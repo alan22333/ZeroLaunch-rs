@@ -238,4 +238,4 @@ If you like ZeroLaunch-rs, you can support us in the following ways:
 
 > This project currently **focuses on optimizing core search and launch features only**. Other features are not prioritized at this stage. If you have feature requests or discover bugs, please feel free to submit an Issue. I'll review feedback regularly and optimize or fix issues accordingly. Thank you for your understanding and support!
 
-[![Star History Chart](https://api.star-history.com/svg?repos=ghost-him/zerolaunch-rs&type=Date)](https://www.star-history.com/#ghost-him/zerolaunch-rs&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=ghost-him/zerolaunch-rs&type=Date)](https://star-history.dera.page/#ghost-him/zerolaunch-rs&Date)
