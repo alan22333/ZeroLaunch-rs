@@ -18,6 +18,9 @@ zip 根目录结构（与宿主安装器约定一致，manifest.toml 必须位�
     ui/...                  # 若存在
     i18n/...                # 若存在
     <icon 文件>             # 若 manifest [icon] path 声明
+    extra/ 目录内容         # 若存在：内容并入 zip 根（如 extra/Everything64.dll →
+                            # 根/Everything64.dll，与 exe 同级；子目录保持相对结构），
+                            # 用于随插件分发需与 exe 同目录的运行时文件
 
 安装方式: 设置 → 插件管理 → 安装本地插件，选择该 zip；
 或手动解压到 %APPDATA%/ZeroLaunch/plugins/<plugin-id>/。
@@ -106,6 +109,9 @@ def collect_entries(manifest: dict, binary: Path) -> list[tuple[Path, str]]:
 
     打包内容：manifest.toml（必需）、bin/<command 文件名>、ui/、i18n/、
     以及 manifest [icon] path 声明的图标文件（若存在）。
+    另有约定目录 extra/（可选）：目录内容原样并入 zip 根，与 manifest.toml、
+    bin/ 同级——用于分发需与 exe 同目录的运行时文件（如 Everything64.dll）；
+    子目录保持相对结构（extra/sub/x → zip 根 sub/x）。
     """
     command = manifest.get("runtime", {}).get("command")
     if not command:
@@ -118,6 +124,11 @@ def collect_entries(manifest: dict, binary: Path) -> list[tuple[Path, str]]:
             for p in sorted(src.rglob("*")):
                 if p.is_file():
                     entries.append((p, f"{sub}/{p.relative_to(src).as_posix()}"))
+    extra = ROOT / "extra"
+    if extra.is_dir():
+        for p in sorted(extra.rglob("*")):
+            if p.is_file():
+                entries.append((p, p.relative_to(extra).as_posix()))
     icon = (manifest.get("icon") or {}).get("path")
     if icon:
         icon_rel = Path(icon)
