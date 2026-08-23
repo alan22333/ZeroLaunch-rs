@@ -175,7 +175,6 @@
     "detailExcluded": "排除",
     "thirdPartyPlugins": {
       "title": "插件管理",
-      "installNotSupported": "當前版本暫時不支援第三方插件的安裝，還需要後續的除錯與最佳化",
       "installFromFile": "從本地檔案安裝",
       "installDialogTitle": "安裝插件",
       "dropHint": "將 .zip 插件包或插件目錄拖到此處",

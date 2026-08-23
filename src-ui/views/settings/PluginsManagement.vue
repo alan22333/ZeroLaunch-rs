@@ -5,7 +5,7 @@ import { i18n, resolveText, type Locale } from '@/i18n'
 import { refreshPluginTranslations } from '@/stores/i18n-store'
 import {
   NButton, NDataTable, NTag, NSpace, NText, NModal, NSwitch,
-  NCode, NSpin, NEmpty, NAlert, NDescriptions, NDescriptionsItem, useMessage,
+  NCode, NSpin, NEmpty, NDescriptions, NDescriptionsItem, useMessage,
 } from 'naive-ui'
 import type { DataTableColumn } from 'naive-ui'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
@@ -182,7 +182,6 @@ const columns: DataTableColumn<PluginRow>[] = [
           }, { default: () => t('settings.thirdPartyPlugins.logs') }),
           h(NButton, {
             size: 'small',
-            disabled: true,
             onClick: () => handleReload(row.plugin.pluginId),
           }, { default: () => t('settings.thirdPartyPlugins.reload') }),
           h(NButton, {
@@ -253,10 +252,6 @@ async function setupDragDrop() {
 
 /** 校验拖入路径：多文件时优先取第一个 .zip，其余忽略；单个目录直接放行（后端校验 manifest）。 */
 function handleDroppedPaths(paths: string[]) {
-  // 当前版本暂不支持第三方插件安装，拦截拖入；恢复安装时删除下面两行守卫即可
-  message.warning(t('settings.thirdPartyPlugins.installNotSupported'))
-  return
-
   const zipPaths = paths.filter((p) => p.toLowerCase().endsWith('.zip'))
   const chosen = zipPaths[0] ?? (paths.length === 1 ? paths[0] : null)
   if (!chosen) {
@@ -418,21 +413,12 @@ onUnmounted(() => {
 
 <template>
   <div class="plugins-management">
-    <!-- 当前版本暂不支持第三方插件安装：入口置灰 + 拖拽拦截，仅保留已装插件管理 -->
-    <NAlert
-      type="warning"
-      style="margin-bottom: 16px;"
-      :show-icon="true"
-    >
-      {{ t('settings.thirdPartyPlugins.installNotSupported') }}
-    </NAlert>
-
     <NSpace style="margin-bottom: 16px;" align="center">
       <NText tag="h2" style="margin: 0;">{{ t('settings.thirdPartyPlugins.title') }}</NText>
-      <NButton type="primary" disabled @click="handleChooseZip">
+      <NButton type="primary" @click="handleChooseZip">
         {{ t('settings.thirdPartyPlugins.installFromFile') }}
       </NButton>
-      <NButton secondary disabled @click="handleChooseDir">
+      <NButton secondary @click="handleChooseDir">
         {{ t('settings.thirdPartyPlugins.installFromDir') }}
       </NButton>
     </NSpace>
@@ -440,7 +426,7 @@ onUnmounted(() => {
     <!-- 拖拽安装区（拖放事件为 webview 级，仅本组件挂载期间监听） -->
     <div class="drop-zone" :class="{ dragging: isDragging }">
       <NText depth="3">{{ t('settings.thirdPartyPlugins.dropHint') }}</NText>
-      <NButton size="small" secondary disabled @click="handleChooseZip">
+      <NButton size="small" secondary @click="handleChooseZip">
         {{ t('settings.thirdPartyPlugins.chooseFile') }}
       </NButton>
     </div>
