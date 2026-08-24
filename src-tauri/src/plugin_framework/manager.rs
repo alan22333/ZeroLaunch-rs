@@ -16,11 +16,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::AppHandle;
 use tauri::Emitter;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use zerolaunch_plugin_api::config::Configurable;
 use zerolaunch_plugin_api::host::PluginSdkConfig;
-use zerolaunch_plugin_api::plugin::{PluginKind, PluginMetadata};
+use zerolaunch_plugin_api::plugin::{PluginKind, PluginMetadata, PluginMode};
 use zerolaunch_plugin_host::host_dispatch::HostCallHandler;
 use zerolaunch_plugin_host::manager::{
     CrashCallback, InstalledPluginInfo, PluginHostManager, PluginLoadError, PluginRegistration,
@@ -35,6 +35,21 @@ use crate::plugin_framework::builtin_registry::{CollectedBuiltins, InventoryCont
 use crate::plugin_framework::zlplugin_protocol::ZlpluginProtocolHandler;
 use crate::plugin_framework::SessionDispatcher;
 use crate::sdk::HostApi;
+/// 校验面板形态插件的 UI 契约：声明热键的 Panel 形态插件须有 [ui].panelEntry，
+/// 否则唤醒后无法渲染面板 UI。仅告警，不阻断加载。
+fn check_panel_ui_contract(plugin_id: &str, metadata: &PluginMetadata, manifest: &Manifest) {
+    let has_panel_entry = manifest
+        .ui
+        .as_ref()
+        .and_then(|ui| ui.panel_entry.as_ref())
+        .is_some();
+    if metadata.mode == PluginMode::Panel && metadata.hotkey.is_some() && !has_panel_entry {
+        warn!(
+            "插件 {} 为 Panel 形态并声明了热键 {:?}，但 manifest 缺少 [ui].panelEntry，唤醒后无法渲染面板",
+            plugin_id, metadata.hotkey
+        );
+    }
+}
 
 use super::host_handler::TauriHostCallHandler;
 use super::plugin_info::InstallError;
@@ -403,6 +418,11 @@ impl PluginManager {
             ))
         })?;
 
+        check_panel_ui_contract(plugin_id, &adapters.metadata, &adapters.manifest);
+
+        // 安装成功 = 文件落盘 + 子进程加载验证通过
+        info!("Installed plugin {}", plugin_id);
+
         // priority 与 list_plugins/plugin_info 统一取插件级元数据声明值（不再用组件最小优先级）。
         // 安装成功即子进程已加载运行，state 恒为 Running。
         Ok(InstalledPluginInfo {
@@ -603,6 +623,8 @@ impl PluginManager {
         // 注册插件翻译目录（<plugin_dir>/i18n/<lang>.json），供前端经 IPC 合并
         self.i18n_manager()
             .register_plugin_catalog(&plugin_id, plugin_dir);
+
+        check_panel_ui_contract(&plugin_id, &registered.metadata, &registered.manifest);
 
         info!("Loaded third-party plugin: {}", plugin_id);
 

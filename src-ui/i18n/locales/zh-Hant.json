@@ -10,7 +10,9 @@
     "selectItem": "選擇一個項目",
     "confirm": "確定",
     "notAvailable": "—",
-    "secondsShort": "秒"
+    "secondsShort": "秒",
+    "ready": "就緒",
+    "open": "開啟"
   },
   "search": {
     "placeholder": "輸入關鍵詞搜尋...",
@@ -1137,5 +1139,16 @@
       "name": "計算器",
       "description": "在搜尋欄中直接進行數學計算"
     }
+  },
+  "pluginPanel": {
+    "unavailable": {
+      "title": "外掛面板不可用",
+      "desc": "外掛未提供面板介面（manifest.toml 缺少 [ui].panelEntry），無法渲染面板內容。",
+      "type": "類型: {type}"
+    },
+    "loadError": "面板載入失敗: {message}"
+  },
+  "pluginSettings": {
+    "loadError": "設定面板載入失敗: {message}"
   }
 }

@@ -9,15 +9,32 @@ use std::sync::Arc;
 
 pub type CandidateId = u64;
 
-/// 执行目标类型枚举，用于 ActionExecutor 注册和查找
+/// 执行目标类型枚举，用于 ActionExecutor 注册和查找。
+/// 序列化键名显式标注（serde-rename 契约），与 as_str() 前端词表一致。
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TargetType {
+    /// 文件路径目标（exe/lnk/url 等，由对应 executor 启动）。
+    #[serde(rename = "Path")]
     Path,
+    /// 应用目标（应用枚举器产物，经 AppLauncher 启动）。
+    #[serde(rename = "App")]
     App,
+    /// 文件目标（系统关联打开）。
+    #[serde(rename = "File")]
     File,
+    /// URL 目标（浏览器打开）。
+    #[serde(rename = "Url")]
     Url,
+    /// 命令目标（shell 执行）。
+    #[serde(rename = "Command")]
     Command,
+    /// 内置命令目标（宿主 app_command 通道）。
+    #[serde(rename = "BuiltinCommand")]
     BuiltinCommand,
+    /// 沉浸式插件面板候选 —— 选中即唤醒插件面板（宿主内置 PluginWakeExecutor
+    /// 消费，不注册第三方执行器）。前端词表键名 "Plugin"。
+    #[serde(rename = "Plugin")]
+    Plugin,
 }
 
 impl TargetType {
@@ -29,6 +46,7 @@ impl TargetType {
             TargetType::Url => "Url",
             TargetType::Command => "Command",
             TargetType::BuiltinCommand => "BuiltinCommand",
+            TargetType::Plugin => "Plugin",
         }
     }
 }
@@ -48,6 +66,10 @@ pub enum ExecutionTarget {
     Command(String),
     #[serde(rename = "builtinCommand")]
     BuiltinCommand(String),
+    /// 沉浸式插件面板候选 —— 载荷为插件 id，选中后由宿主内置
+    /// PluginWakeExecutor 唤醒其面板（wake_plugin）。
+    #[serde(rename = "plugin")]
+    Plugin(String),
 }
 
 impl ExecutionTarget {
@@ -59,6 +81,7 @@ impl ExecutionTarget {
             ExecutionTarget::Url(_) => TargetType::Url,
             ExecutionTarget::Command(_) => TargetType::Command,
             ExecutionTarget::BuiltinCommand(_) => TargetType::BuiltinCommand,
+            ExecutionTarget::Plugin(_) => TargetType::Plugin,
         }
     }
 
@@ -70,6 +93,7 @@ impl ExecutionTarget {
             ExecutionTarget::Url(s) => s,
             ExecutionTarget::Command(s) => s,
             ExecutionTarget::BuiltinCommand(s) => s,
+            ExecutionTarget::Plugin(s) => s,
         }
     }
 }
@@ -281,14 +305,23 @@ pub trait ActionExecutor: Configurable {
 ///
 /// 各通道独立维护查询版本计数器，跨通道查询互不使对方过期；
 /// 且仅 GUI 通道允许改写会话状态（会话模式、面板交互事件）与
-/// 插件侧跨查询共享状态（如剪贴板缓存），CLI 查询为只读辅助路径。
+/// 插件侧跨查询共享状态（如剪贴板缓存）；CLI 与面板通道为只读辅助路径。
+///
+/// 序列化键名显式标注（serde-rename 契约）：本枚举经 PluginContext 跨 RPC
+/// 传输到远端插件进程，键名更改会使旧 SDK 二进制反序列化失败。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum QueryChannel {
-    /// 主窗口 GUI 查询（bridge_query）。
+    /// 主窗口 GUI 查询（bridge_query，用户搜索栏输入）—— 唯一允许改写会话的通道。
     #[default]
+    #[serde(rename = "ui")]
     Ui,
-    /// 本地 CLI HTTP 查询（/v1/query）。
+    /// 本地 CLI HTTP 查询（/v1/query，外部进程只读辅助路径）。
+    #[serde(rename = "cli")]
     Cli,
+    /// 沉浸式/行内插件面板内查询（bridge_query 显式指定插件）——
+    /// GUI 进程内只读辅助路径：不改写会话、不参与用户输入版本竞争。
+    #[serde(rename = "panel")]
+    Panel,
 }
 
 /// 查询版本门控：宿主在每次查询入口分配单调递增版本号，
@@ -611,6 +644,10 @@ pub struct PluginMetadata {
     pub description: String,
     #[serde(rename = "author")]
     pub author: String,
+    /// 触发关键词列表 —— **语义随形态而变**：
+    /// - 行内形态（Inline）：路由触发词，用户输入"触发词 + 空格"命中路由；
+    /// - 沉浸式形态（Panel）：**候选搜索关键字**——宿主不将其写入触发词路由，
+    ///   而是注入到该插件的默认搜索候选项匹配关键字中（用户输入该词显示候选项）。
     #[serde(rename = "triggerKeywords")]
     pub trigger_keywords: Vec<String>,
     #[serde(rename = "supportedOs")]
@@ -635,8 +672,12 @@ pub struct PluginMetadata {
     pub mode: PluginMode,
 }
 
-/// 插件形态 —— 区分完全插件模式（trigger 类型）与行内插件。
+/// 插件形态 —— 决定唤醒方式与展示形态。
 /// 与 PluginKind（内置/第三方）正交；序列化键名 "inline"/"panel"。
+///
+/// Inline = 触发词路由（trigger_keywords 生效）；Panel = 触发词不参与路由
+/// （转为候选搜索关键字），仅经热键（hotkey）或候选项选中唤醒，且响应必须为
+/// `CustomPanel{keep_search_bar: false}`（全窗口接管）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum PluginMode {
     /// 行内插件：仅关键词唤醒，结果/面板嵌入搜索窗口（保留搜索栏）。
@@ -750,6 +791,37 @@ mod tests {
             roundtrip.query_channel,
             QueryChannel::Ui,
             "通道字段应参与序列化且缺省为 GUI 通道"
+        );
+    }
+
+    #[test]
+    /// 验证通道与目标类型的序列化键名契约（serde-rename）。
+    fn query_channel_and_target_type_serialize_with_stable_keys() {
+        assert_eq!(
+            serde_json::to_value(QueryChannel::Ui).unwrap(),
+            json!("ui"),
+            "GUI 通道键名应为 ui"
+        );
+        assert_eq!(
+            serde_json::to_value(QueryChannel::Cli).unwrap(),
+            json!("cli"),
+            "CLI 通道键名应为 cli"
+        );
+        assert_eq!(
+            serde_json::to_value(QueryChannel::Panel).unwrap(),
+            json!("panel"),
+            "面板通道键名应为 panel"
+        );
+
+        use super::TargetType;
+        assert_eq!(
+            serde_json::to_value(TargetType::Plugin).unwrap(),
+            json!("Plugin"),
+            "插件目标类型键名应与前端词表一致"
+        );
+        assert_eq!(
+            serde_json::to_value(TargetType::Path).unwrap(),
+            json!("Path")
         );
     }
 

@@ -2,7 +2,9 @@ use crate::core::bias_rule::BiasRule;
 use std::collections::HashMap;
 use std::sync::Arc;
 use zerolaunch_plugin_api::config::Configurable;
-use zerolaunch_plugin_api::{CachedCandidateData, DataSource, KeywordInjector, KeywordOptimizer};
+use zerolaunch_plugin_api::{
+    CachedCandidateData, DataSource, KeywordInjector, KeywordOptimizer, SearchCandidate,
+};
 
 pub struct CandidatePipeline {
     data_sources: Vec<Arc<dyn DataSource>>,
@@ -54,17 +56,23 @@ impl CandidatePipeline {
             .retain(|inj| inj.component_id() != component_id);
     }
 
-    /// 收集候选项。
-    /// 管道中只包含已启用的组件（由 SessionRouter 在启用/禁用时动态维护），
-    /// 此处无需再做 enabled 过滤。
+    /// 收集数据源候选项并统一过关键字处理流水线（优化器只排序一次、候选只遍历一次）。
+    /// 沉浸式插件候选不在此收集，由调用方经 CachedCandidateData::add_plugin_candidate
+    /// 单独并入缓存。
     pub async fn collect(&self) -> CachedCandidateData {
-        let mut candidates = CachedCandidateData::new();
-
+        let mut raw: Vec<SearchCandidate> = Vec::new();
         for source in &self.data_sources {
-            candidates.add_candidates(source.fetch_candidates().await);
+            raw.extend(
+                source
+                    .fetch_candidates()
+                    .await
+                    .get_candidates()
+                    .iter()
+                    .cloned(),
+            );
         }
 
-        // 排序优化器
+        // 优化器按 priority 升序（一次构建，供全部候选复用）
         let mut sorted: Vec<&dyn KeywordOptimizer> =
             self.keyword_optimizers.iter().map(|a| a.as_ref()).collect();
         sorted.sort_by_key(|op| op.get_priority());
@@ -73,29 +81,39 @@ impl CandidatePipeline {
         let injectors: Vec<&dyn KeywordInjector> =
             self.keyword_injectors.iter().map(|a| a.as_ref()).collect();
 
-        for candidate in candidates.get_candidates_mut() {
-            // 1. 名称无关的字符串变换
-            candidate.keywords = Self::apply_keyword_optimizers(&candidate.name, &sorted);
+        let processed: Vec<SearchCandidate> = raw
+            .into_iter()
+            .map(|c| self.process_candidate(c, &sorted, &injectors))
+            .collect();
 
-            // 2. 候选项相关的关键字注入
-            for injector in &injectors {
-                candidate
-                    .keywords
-                    .extend(injector.inject_keywords(candidate));
-            }
-
-            candidate.keywords = Self::deduplicate_keywords(candidate.keywords.clone());
+        // 统一去重 + 分配 id（重建索引）
+        let mut candidates = CachedCandidateData::new();
+        for c in processed {
+            candidates.add_candidate(c);
         }
-
-        // 3. 固定偏移量注入（在关键字注入之后、检索引擎之前）
-        for candidate in candidates.get_candidates_mut() {
-            let target = candidate.target.payload().to_ascii_lowercase();
-            if let Some(bias) = self.bias_rules.get(&target) {
-                candidate.bias += bias;
-            }
-        }
-
         candidates
+    }
+
+    /// 对单个候选运行完整关键字处理流水线（纯函数，值进值出）：
+    /// 保留候选自带 keywords → 名称派生（优化器链）→ 注入器 → 去重 → 固定偏置。
+    /// `sorted` / `injectors` 由调用方一次性构建传入。
+    pub fn process_candidate(
+        &self,
+        mut candidate: SearchCandidate,
+        sorted: &[&dyn KeywordOptimizer],
+        injectors: &[&dyn KeywordInjector],
+    ) -> SearchCandidate {
+        let mut keywords = std::mem::take(&mut candidate.keywords);
+        keywords.extend(Self::apply_keyword_optimizers(&candidate.name, sorted));
+        for injector in injectors {
+            keywords.extend(injector.inject_keywords(&candidate));
+        }
+        candidate.keywords = Self::deduplicate_keywords(keywords);
+        let target = candidate.target.payload().to_ascii_lowercase();
+        if let Some(bias) = self.bias_rules.get(&target) {
+            candidate.bias += bias;
+        }
+        candidate
     }
 
     /// 对单个名称运行优化器链，返回去重后的关键字列表。

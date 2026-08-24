@@ -53,6 +53,7 @@ pub trait IconExtractor: Send + Sync {
             IconRequest::Path(p) => self.extract_from_path(p).await,
             IconRequest::Url(u) => self.extract_from_url(u).await,
             IconRequest::Extension(e) => self.extract_from_extension(e).await,
+            IconRequest::Data(data) => decode_data_url(data),
         }
     }
 
@@ -169,4 +170,17 @@ async fn write_back_cache(
     if level == CacheLevel::Full || level == CacheLevel::SkipMemory {
         cache.set_l2(hash_key, icon_data.to_vec()).await;
     }
+}
+
+/// 解码 data URL 或纯 base64 为原始字节（IconRequest::Data 直通路径）。
+/// 参数：data - "data:<mime>;base64,<payload>" 形式或纯 base64 字符串。
+/// 返回：解码后的字节；格式不合法返回 HostApiError。
+fn decode_data_url(data: &str) -> Result<Vec<u8>, HostApiError> {
+    let payload = data.rsplit_once(";base64,").map(|(_, p)| p).unwrap_or(data);
+    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, payload).map_err(|e| {
+        HostApiError::IconExtractionFailed {
+            request: "data".to_string(),
+            reason: format!("data URL 解码失败: {}", e),
+        }
+    })
 }

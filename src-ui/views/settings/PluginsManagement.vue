@@ -446,38 +446,46 @@ onUnmounted(() => {
     </NDataTable>
 
     <!-- 安装确认弹窗 -->
-    <NModal v-model:show="showInstall" :title="t('settings.thirdPartyPlugins.installDialogTitle')">
-      <div style="padding: 24px; width: 420px;">
-        <NText>{{ t('settings.thirdPartyPlugins.installConfirmContent', { name: pendingFileName }) }}</NText>
-        <NText depth="3" style="display: block; margin-top: 8px; word-break: break-all;">
-          {{ pendingPath }}
-        </NText>
-        <NSpace style="margin-top: 16px;" justify="end">
-          <NButton :disabled="installing" @click="showInstall = false">
-            {{ t('settings.thirdPartyPlugins.installConfirmNegative') }}
-          </NButton>
-          <NButton type="primary" :loading="installing" @click="handleInstall">
-            {{ t('settings.thirdPartyPlugins.installConfirmPositive') }}
-          </NButton>
-        </NSpace>
-      </div>
+    <NModal
+      v-model:show="showInstall"
+      :title="t('settings.thirdPartyPlugins.installDialogTitle')"
+      preset="card"
+      style="width: 420px; max-width: calc(100vw - 48px);"
+    >
+      <NText>{{ t('settings.thirdPartyPlugins.installConfirmContent', { name: pendingFileName }) }}</NText>
+      <NText depth="3" style="display: block; margin-top: 8px; word-break: break-all;">
+        {{ pendingPath }}
+      </NText>
+      <NSpace style="margin-top: 16px;" justify="end">
+        <NButton :disabled="installing" @click="showInstall = false">
+          {{ t('settings.thirdPartyPlugins.installConfirmNegative') }}
+        </NButton>
+        <NButton type="primary" :loading="installing" @click="handleInstall">
+          {{ t('settings.thirdPartyPlugins.installConfirmPositive') }}
+        </NButton>
+      </NSpace>
     </NModal>
 
     <!-- 日志查看弹窗 -->
-    <NModal v-model:show="showLogs" :title="t('settings.thirdPartyPlugins.logsTitle')">
-      <div style="padding: 24px; width: 600px; max-height: 400px; overflow: auto;">
-        <NText depth="3" style="margin-bottom: 8px; display: block;">
-          {{ t('settings.thirdPartyPlugins.logFor', { name: logPluginId }) }}
-        </NText>
-        <NSpin :show="logLoading">
+    <NModal
+      v-model:show="showLogs"
+      :title="t('settings.thirdPartyPlugins.logsTitle')"
+      preset="card"
+      style="width: 600px; max-width: calc(100vw - 48px);"
+    >
+      <NText depth="3" style="margin-bottom: 8px; display: block;">
+        {{ t('settings.thirdPartyPlugins.logFor', { name: logPluginId }) }}
+      </NText>
+      <NSpin :show="logLoading">
+        <div style="max-height: 360px; overflow: auto;">
           <NCode
             v-if="logContent"
             :code="logContent"
             language="text"
           />
           <NText v-else depth="3">{{ t('settings.thirdPartyPlugins.noLogs') }}</NText>
-        </NSpin>
-      </div>
+        </div>
+      </NSpin>
     </NModal>
 
     <!-- 插件详情弹窗：元数据（含触发词）+ 第三方 manifest -->

@@ -15,6 +15,9 @@ pub enum IconRequest {
     /// 文件扩展名 (.txt, .doc) -> 获取系统关联图标
     #[serde(rename = "extension")]
     Extension(String),
+    /// 已编码的图标数据（data URL 或 base64）-> 解码直通，不做文件/网络提取
+    #[serde(rename = "data")]
+    Data(String),
 }
 
 impl IconRequest {
@@ -22,6 +25,7 @@ impl IconRequest {
     pub fn value(&self) -> &str {
         match self {
             IconRequest::Path(s) | IconRequest::Url(s) | IconRequest::Extension(s) => s.as_str(),
+            IconRequest::Data(s) => s.as_str(),
         }
     }
 

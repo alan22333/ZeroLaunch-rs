@@ -199,6 +199,9 @@ pub async fn plugin_set_enabled(
     // 内置组件 component_id == plugin_id，事件异步到达后为幂等重入）。
     dispatcher.set_plugin_enabled(&plugin_id, enabled);
 
+    // 插件启停影响插件候选项集合（Panel 形态插件的唤醒入口）：变更后立即刷新。
+    dispatcher.refresh_candidates().await;
+
     Ok(())
 }
 

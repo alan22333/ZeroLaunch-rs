@@ -5,17 +5,44 @@
 第三方插件以**独立子进程**方式运行，通过 **stdio JSON-RPC 2.0** 与 ZeroLaunch 宿主通信。
 支持任意编程语言（Rust、Python、Node.js 等）。
 
-### 插件能做什么
+## 插件形态与唤醒契约（重要）
 
-- **Plugin（触发式）**：定义触发关键词，用户输入时返回搜索结果或自定义面板
-- **DataSource**：提供搜索候选项（如列出密码条目、书签）
-- **ActionExecutor**：为特定 TargetType 注册执行动作（如"用 IDA 打开"）
+`PluginMetadata.mode` 决定插件形态，**唤醒方式由形态决定，二者不可混用**：
 
-### 插件不能做什么（第一版）
+| 形态 | 触发词语义 | 唤醒方式 | 展示 |
+|---|---|---|---|
+| 行内（`inline`） | **路由触发词**（如 "ev " 命中路由） | 用户输入触发词 + 空格，宿主路由 | 结果列表嵌入搜索窗口（保留搜索栏） |
+| 沉浸式（`panel`） | **候选搜索关键字**（如 "ev" 命中候选项） | ① 声明热键（`hotkey`，如 "Ctrl+E"）② 候选项被选中 | 全窗口接管（`CustomPanel` + `keepSearchBar=false`） |
 
-- 修改搜索引擎算法
-- 影响分数排序
-- 访问其他插件的数据
+- 行内插件返回 `List`（结果嵌入）或 `CustomPanel`（`keepSearchBar=true` 行内面板）
+- 沉浸式插件 **必须** 返回 `CustomPanel`（`keepSearchBar=false`），否则热键唤醒报错
+- `trigger_keywords` 语义随形态而变：Inline = 路由触发词；Panel = 候选搜索关键字
+  （**不参与路由**，宿主注册时过滤；注入为候选项匹配关键字）
+- **候选项自动注入**：启用的沉浸式插件自动成为默认搜索候选项——**不经数据源
+  关键字流水线**（`trigger_keywords` 是插件设计好的精确关键字，加上插件名即完成
+  匹配，无需优化器派生），且**不参与展示名去重**（插件名与程序名相同不互相丢弃）。
+  选中候选项即唤醒面板——无需插件做任何事。实现为宿主内置 `PluginWakeExecutor`：
+  统一经 executor 管道（`resolve → execute → wake_plugin`），与普通候选确认路径
+  完全一致，无特判分支。图标为插件元数据 data URL（`IconRequest::Data` 直通
+  图标链路），`targetType` 为 `"Plugin"`（前端词表键名，无特判消费）
+
+### 面板类型（panel_type）契约
+
+`CustomPanel.panel_type` 由**后端统一规范化**后再下发前端：
+- 内置插件：保留自定义 `panel_type`（匹配内置面板组件）
+- 第三方插件：**统一为 `third-party:<pluginId>`**（前端按插件 id 注册面板 provider，精确匹配）——插件侧返回任意 `panel_type` 均可，无需感知此前缀
+
+### 沉浸式面板的数据通道
+
+面板内输入查询**不能**走触发词路由（沉浸式插件无触发词），面板内嵌执行与宿主
+同 document，统一经 `bridge_query` 显式指定目标插件：
+`bridge_query(rawQuery, confirm, panelPluginId)`——有值时后端直调该插件 `query()`
+（`search_term` = rawQuery 小写，不剥离前缀），走 `QueryChannel::Panel` 通道
+（GUI 进程内只读辅助路径：不参与触发词路由、不改写 GUI 会话、独立版本计数
+不与用户输入/CLI 查询竞争——CLI 通道仅保留给 zerolaunch-cli 外部查询）。
+响应为 `BridgeQueryResponse`（mode 词表 + 图标已解析为 data URL）。
+插件 UI 统一内嵌执行（Shadow DOM + 动态 import `zlplugin://` 资源），
+无 iframe、无 postMessage 桥、无 CLI HTTP 依赖。
 
 ## 快速开始（Rust）
 
@@ -135,25 +162,18 @@ while True:
     # Handle initialize, query, execute_action, etc.
 ```
 
-## 前端 UI
+## 动作执行契约（execute_action 载荷）
 
-如果 manifest.toml 中包含 `[ui]` 部分，宿主会通过 `zlplugin://` 协议暴露 UI 资源：
+插件 `execute_action(action_id, payload)` 收到的 `payload` 形状由**触发通道**决定，
+同一动作可能从两种通道进入，插件应同时兼容：
 
-```toml
-[ui]
-panelEntry = "ui/panel.mjs"
-```
+| 通道 | payload 形状 | 场景 |
+|---|---|---|
+| 候选确认 | `{"candidate_id": <u64>, "query_text": <str>, "user_args": [<str>]}` | 搜索栏结果列表 / 行内参数 / 参数面板确认 |
+| 面板动作 | 插件自定义自由 JSON（宿主原样透传） | 面板按键绑定 `Custom` 动作（内嵌执行，宿主 `executeAction` 直接透传） |
 
-`panel.mjs` 必须 export default function：
-
-```js
-export default function mount(rootEl, host) {
-  rootEl.innerHTML = '<div>Hello</div>'
-  host.onDataUpdate((data, actions) => {
-    // 收到宿主的更新数据
-  })
-}
-```
+候选确认通道的 `candidate_id` 即结果项的 `ListItem.id`；面板动作通道可携带
+面板内状态（如选中项的完整路径），不依赖候选缓存。
 
 ## 调试
 

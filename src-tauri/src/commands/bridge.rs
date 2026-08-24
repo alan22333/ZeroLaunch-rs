@@ -1,12 +1,13 @@
 use crate::commands::bridge_error::{BridgeError, WithTraceId};
 use crate::plugin_framework::inspector::InspectedQueryEvent;
-use crate::plugin_framework::{ConfirmOutcome, ConfirmRequest};
+use crate::plugin_framework::{ConfirmOutcome, ConfirmRequest, SessionDispatcher};
 use crate::state::app_state::AppState;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::Emitter;
 use tracing::{debug, info};
 use zerolaunch_plugin_api::common::ImageUtils;
+use zerolaunch_plugin_api::plugin::PluginKind;
 use zerolaunch_plugin_api::{CandidateId, Query, QueryChannel, QueryResponse, ResultAction};
 // ============================================================================
 // 搜索接口
@@ -162,8 +163,23 @@ pub enum BridgeConfirmResponse {
     },
 }
 
-/// 通用查询入口。
-/// 前端搜索输入变化时调用此命令，后端经 SessionDispatcher 路由到搜索引擎或插件。
+/// 查询请求载荷（bridge_query 参数）。
+#[derive(Deserialize, Debug)]
+pub struct QueryPayload {
+    /// 原始查询文本。
+    #[serde(rename = "rawQuery")]
+    raw_query: String,
+    /// 查询是否由用户显式确认（如按 Enter）触发（语义见 bridge_query 文档）。
+    #[serde(rename = "confirm")]
+    confirm: bool,
+    /// 沉浸式面板数据通道：面板内输入查询时显式指定目标插件
+    /// （QueryChannel::Panel 直调其 query()）；None = 统一路由（触发词/默认搜索）。
+    #[serde(rename = "panelPluginId")]
+    panel_plugin_id: Option<String>,
+}
+
+/// 通用查询入口（含沉浸式面板数据通道）。
+/// 前端搜索输入变化时调用此命令，后端经 SessionDispatcher 路由到搜索引擎或插件；
 /// 图标会被解析为 base64 data URL，前端 IconDisplay 可直接渲染。
 ///
 /// `confirm`：查询是否由用户显式确认（如按 Enter）触发，前端必须显式传入：
@@ -171,15 +187,23 @@ pub enum BridgeConfirmResponse {
 ///   （不执行面板动作），并承担路由职责——文本回退到插件触发词之外时回落搜索、退出面板。
 /// - `true`：用户按 Enter 触发的确认查询。OnEnter 模式下插件据此直接执行动作（如翻译）。
 /// 自动模式（OnInput）与普通搜索忽略该标志，行为与旧版一致。
+///
+/// `payload.panel_plugin_id`：沉浸式面板数据通道（面板内输入查询，显式指定目标插件）。
+/// 有值 → 经 QueryChannel::Panel 直调该插件 query()（只读辅助路径，不改写会话）；
+/// None → 现有路由语义。
 #[tauri::command]
 #[tracing::instrument(skip(state), fields(trace_id))]
 pub async fn bridge_query(
     state: tauri::State<'_, Arc<AppState>>,
-    raw_query: String,
-    confirm: bool,
+    payload: QueryPayload,
 ) -> Result<BridgeQueryResponse, BridgeError> {
     let trace_id = crate::utils::trace_id::generate_trace_id();
     tracing::Span::current().record("trace_id", trace_id.as_str());
+    let QueryPayload {
+        raw_query,
+        confirm,
+        panel_plugin_id,
+    } = payload;
     debug!("[Bridge] 查询: '{}'", raw_query);
 
     let session_dispatcher = state.get_session_dispatcher();
@@ -192,8 +216,18 @@ pub async fn bridge_query(
     };
 
     let query_start = std::time::Instant::now();
+    // 面板查询：显式指定插件直调（QueryChannel::Panel）；否则走统一路由。
     let routed = session_dispatcher
-        .route_query(&trace_id, &query, QueryChannel::Ui)
+        .route_query(
+            &trace_id,
+            &query,
+            if panel_plugin_id.is_some() {
+                QueryChannel::Panel
+            } else {
+                QueryChannel::Ui
+            },
+            panel_plugin_id.as_deref(),
+        )
         .await
         .with_trace_id(&trace_id)?;
 
@@ -227,15 +261,19 @@ pub async fn bridge_query(
         QueryResponse::List { results } => {
             let core_handle = state.get_core_handle();
 
-            // 解析图标：L1 缓存命中率高，几乎零开销；未命中时由 L2 文件缓存兜底
+            // 解析图标：L1 缓存命中率高，几乎零开销；未命中由 L2 文件缓存兜底。
+            // IconRequest::Data（插件候选 data URL）经提取链路解码直通。
             let mut bridge_results = Vec::with_capacity(results.len());
             for item in results {
-                let icon_data = core_handle.get_icon_or_default(item.icon.clone()).await;
+                let icon_data = {
+                    let data = core_handle.get_icon_or_default(item.icon.clone()).await;
+                    ImageUtils::to_data_url(&data)
+                };
                 bridge_results.push(BridgeSearchResult {
                     id: item.id,
                     title: item.title,
                     subtitle: item.subtitle,
-                    icon: ImageUtils::to_data_url(&icon_data),
+                    icon: icon_data,
                     score: item.score,
                     actions: item.actions.into_iter().map(|a| a.into()).collect(),
                     target_type: item.target_type,
@@ -286,6 +324,19 @@ pub async fn bridge_query(
             } else {
                 "plugin_immersive"
             };
+            // 第三方插件 panel_type 统一为 third-party:<id>（前端 provider 匹配契约）
+            let kind = routed
+                .plugin_id
+                .as_deref()
+                .and_then(|id| {
+                    session_dispatcher
+                        .plugin_registry()
+                        .get(id)
+                        .map(|p| p.metadata().kind)
+                })
+                .unwrap_or(PluginKind::Builtin);
+            let panel_type =
+                SessionDispatcher::normalize_panel_type(&routed.plugin_id, kind, &panel_type);
             info!(
                 "[Bridge] 查询完成: '{}' -> 插件面板 '{}' ({})",
                 raw_query, panel_type, mode

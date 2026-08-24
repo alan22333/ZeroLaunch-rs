@@ -7,6 +7,7 @@ pub mod inspector;
 pub mod manager;
 pub mod plugin_info;
 pub(crate) mod plugin_installer;
+pub mod plugin_wake_executor;
 pub mod registry;
 mod search_pipeline;
 mod session_dispatcher;

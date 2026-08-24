@@ -10,7 +10,9 @@
     "selectItem": "Select an item",
     "confirm": "Confirm",
     "notAvailable": "—",
-    "secondsShort": "s"
+    "secondsShort": "s",
+    "ready": "Ready",
+    "open": "Open"
   },
   "search": {
     "placeholder": "Type to search...",
@@ -1137,5 +1139,16 @@
       "name": "Calculator",
       "description": "Evaluate math expressions right in the search bar"
     }
+  },
+  "pluginPanel": {
+    "unavailable": {
+      "title": "Plugin panel unavailable",
+      "desc": "The plugin does not provide a panel UI (manifest.toml is missing [ui].panelEntry), so the panel cannot be rendered.",
+      "type": "Type: {type}"
+    },
+    "loadError": "Panel load failed: {message}"
+  },
+  "pluginSettings": {
+    "loadError": "Settings panel load failed: {message}"
   }
 }

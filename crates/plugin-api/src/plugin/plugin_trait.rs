@@ -27,6 +27,13 @@ pub trait Plugin: Configurable {
     async fn query(&self, ctx: &PluginContext, query: &Query)
         -> Result<QueryResponse, PluginError>;
 
+    /// 执行插件动作。
+    /// `action_id` 为插件在 `ListItem.actions` / `CustomPanel.actions` / 面板按键
+    /// 绑定中声明的动作标识；`payload` 形状由触发通道决定（插件应两种都兼容）：
+    /// - 候选确认通道（搜索栏结果列表 / 行内参数 / 参数面板确认）：
+    ///   `{"candidate_id": <u64>, "query_text": <str>, "user_args": [<str>]}`；
+    /// - 面板动作通道（`PanelKeyAction::Custom` 面板按键绑定）：插件自定义自由 JSON，
+    ///   宿主原样透传。
     async fn execute_action(
         &self,
         ctx: &PluginContext,

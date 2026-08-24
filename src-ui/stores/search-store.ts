@@ -365,6 +365,23 @@ export const useSearchStore = defineStore('search', () => {
     }
     if (!targetActionId) return
 
+    // 插件候选（沉浸式插件唤醒项，targetType === 'Plugin'）：直接确认，不先隐藏
+    // 窗口；后端 wake_plugin 统一保证窗口可见（幂等），由唤醒推送的会话事件接管渲染。
+    if (item.targetType === 'Plugin') {
+      try {
+        await bridgeConfirm({
+          kind: 'candidate',
+          candidateId: item.id,
+          actionId: targetActionId,
+          queryText: query.value,
+          generation: currentGeneration.value,
+        })
+      } catch (e) {
+        console.error('[doConfirm] Plugin wake failed:', e)
+      }
+      return
+    }
+
     // 参数候选（userArgCount > 0，本次确认未带参数）→ 后端必返回 enterParamPanel
     // （镜像 route_confirm：user_arg_count > 0 且 user_args 为空 → 进参数面板）：
     // 窗口保持可见等待参数输入，不适用先隐藏后执行。判定参数取自后端下发的候选数据。

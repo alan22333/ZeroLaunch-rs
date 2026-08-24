@@ -1,5 +1,6 @@
 use serde::Serialize;
 use std::fmt;
+use tracing::error;
 use zerolaunch_plugin_api::config::ConfigError;
 use zerolaunch_plugin_api::HostApiError;
 
@@ -228,6 +229,17 @@ pub trait WithTraceId<T> {
 
 impl<T, E: Into<BridgeError>> WithTraceId<T> for Result<T, E> {
     fn with_trace_id(self, trace_id: &str) -> Result<T, BridgeError> {
-        self.map_err(|e| e.into().with_trace_id(trace_id))
+        self.map_err(|e| {
+            let bridge_err: BridgeError = e.into().with_trace_id(trace_id);
+            // IPC 边界统一失败日志：命令错误仅经此唯一转换点，此处打印与返回前端的
+            // 错误一一对应（可经 trace_id 关联定位）。
+            error!(
+                trace_id = %bridge_err.trace_id,
+                code = %bridge_err.code,
+                error = %bridge_err.message,
+                "IPC 命令执行失败"
+            );
+            bridge_err
+        })
     }
 }

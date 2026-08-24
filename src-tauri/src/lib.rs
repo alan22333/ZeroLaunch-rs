@@ -108,6 +108,12 @@ pub fn run() {
                         http::header::CONTENT_TYPE,
                         http::HeaderValue::from_str(&mime).unwrap(),
                     );
+                    // 插件资源经页面动态 import/fetch 加载（与页面不同源），放行 CORS；
+                    // 执行面由 CSP script-src 的 zlplugin: 白名单约束。
+                    response.headers_mut().insert(
+                        http::header::ACCESS_CONTROL_ALLOW_ORIGIN,
+                        http::HeaderValue::from_static("*"),
+                    );
                     response
                 }
                 Err(e) => {

@@ -97,6 +97,16 @@ export type BridgeQueryResponse =
  * - `candidate`：宿主候选确认（默认搜索执行 / 插件面板默认动作）；
  * - `pluginAction`：插件面板动作（面板按键契约 Custom / GotoPanel 回插件）。
  */
+/**
+ * 查询请求 —— `bridge_query` 的 IPC 载荷（与后端 QueryPayload 对齐）。
+ * `panelPluginId` 有值时 = 沉浸式面板数据通道（面板内查询，显式指定目标插件）。
+ */
+export interface QueryPayload {
+  rawQuery: string
+  confirm: boolean
+  panelPluginId: string | null
+}
+
 export type ConfirmRequest =
   | {
       kind: 'candidate'

@@ -6,8 +6,9 @@
       v-bind="panelProps"
     />
     <div v-else class="fallback-panel">
-      <n-text depth="3">插件面板: {{ panelType }}</n-text>
-      <pre v-if="panelData">{{ JSON.stringify(panelData, null, 2) }}</pre>
+      <n-text depth="3">{{ $t('pluginPanel.unavailable.title') }}</n-text>
+      <n-text depth="2" class="fallback-desc">{{ $t('pluginPanel.unavailable.desc') }}</n-text>
+      <n-text depth="3" class="fallback-type">{{ $t('pluginPanel.unavailable.type', { type: panelType }) }}</n-text>
     </div>
   </div>
 </template>
@@ -50,13 +51,13 @@ const panelProps = computed(() => ({
   margin: 8px 16px;
   border-radius: var(--radius-sm);
   background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-pre {
-  margin-top: 8px;
-  font-size: 11px;
-  overflow-x: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
+.fallback-type {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
 }
 </style>

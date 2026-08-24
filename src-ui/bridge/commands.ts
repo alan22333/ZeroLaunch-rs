@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { open as shellOpen } from '@tauri-apps/plugin-shell'
-import type { BridgeQueryResponse, ConfirmRequest, ConfirmResponse, ComponentInfo, ComponentSchema, ConfigActionDef, ConfigActionPayload, SearchTimingResult, IndexTimingResult, SearchDetailItem, PluginTranslationCatalog } from './contract'
+import type { BridgeQueryResponse, ConfirmRequest, ConfirmResponse, ComponentInfo, ComponentSchema, ConfigActionDef, ConfigActionPayload, QueryPayload, SearchTimingResult, IndexTimingResult, SearchDetailItem, PluginTranslationCatalog } from './contract'
 export interface BridgeError {
   code: string
   message: string
@@ -45,8 +45,23 @@ async function invokeCommand<T>(cmd: string, args?: Record<string, unknown>): Pr
  * 发起查询。
  * @param confirm 是否由用户显式确认（Enter）触发：false=预览/路由查询（OnEnter 模式返回 ready），true=确认查询（OnEnter 模式执行动作）。
  */
-export function bridgeQuery(rawQuery: string, confirm: boolean): Promise<BridgeQueryResponse> {
-  return invokeCommand<BridgeQueryResponse>('bridge_query', { rawQuery, confirm })
+/**
+ * 通用查询（含沉浸式面板数据通道）。
+ * `panelPluginId`：面板内输入查询时显式指定目标插件（后端直调其 query()，
+ * QueryChannel::Panel 只读辅助路径，不经触发词路由、不改写会话）；
+ * 省略时走统一路由（触发词/默认搜索）。
+ */
+export function bridgeQuery(
+  rawQuery: string,
+  confirm: boolean,
+  panelPluginId?: string,
+): Promise<BridgeQueryResponse> {
+  const payload: QueryPayload = {
+    rawQuery,
+    confirm,
+    panelPluginId: panelPluginId ?? null,
+  }
+  return invokeCommand<BridgeQueryResponse>('bridge_query', { payload })
 }
 
 export function bridgeConfirm(payload: ConfirmRequest): Promise<ConfirmResponse> {

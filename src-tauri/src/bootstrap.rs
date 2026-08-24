@@ -29,6 +29,7 @@ use crate::core::config::{ConfigEvent, ConfigManager};
 use crate::core::i18n::I18nManager;
 use crate::plugin_framework::inspector::Inspector;
 use crate::plugin_framework::manager::PluginManager;
+use crate::plugin_framework::plugin_wake_executor::PluginWakeExecutor;
 use crate::state::app_state::AppState;
 use crate::tray::TrayManager;
 use crate::utils::trace_id::generate_trace_id;
@@ -464,6 +465,10 @@ pub(crate) async fn init_plugin_system(state: &Arc<AppState>) -> HashSet<String>
             );
         }
     }
+    // 宿主内置执行器（不随 inventory 注册）：沉浸式插件候选项唤醒 → wake_plugin。
+    session_dispatcher.register_executor(Arc::new(PluginWakeExecutor::new(Arc::downgrade(
+        session_dispatcher,
+    ))));
     for (c, se) in &collected.search_engines {
         if config_manager.find_configurable(c.component_id()).is_some() {
             session_dispatcher
@@ -627,7 +632,8 @@ pub(crate) async fn init_plugin_system(state: &Arc<AppState>) -> HashSet<String>
     candidate_pipeline.set_bias_rules(rules);
 
     info!("正在收集候选项（此时各组件已持有用户持久化配置）...");
-    let candidates = candidate_pipeline.collect().await;
+    // 插件候选项经统一合并入口并入缓存
+    let candidates = session_dispatcher.merge_plugin_candidates(candidate_pipeline.collect().await);
     info!(
         "候选项收集完成，共 {} 个",
         candidates.get_candidates().len()

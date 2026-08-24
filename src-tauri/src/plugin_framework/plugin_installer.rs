@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use regex::Regex;
-use tracing::{debug, info};
+use tracing::debug;
 use walkdir::WalkDir;
 use zerolaunch_plugin_protocol::manifest::PLUGIN_ID_RE;
 use zerolaunch_plugin_protocol::Manifest;
@@ -134,10 +134,9 @@ impl PluginInstaller {
 
         verify_install_dir(&target_dir)?;
 
-        info!(
-            "Installed plugin {} from {} to {}",
+        debug!(
+            "Extracted plugin {} files to {} (manifest validation happens at load)",
             plugin_id,
-            zip_path.display(),
             target_dir.display()
         );
 

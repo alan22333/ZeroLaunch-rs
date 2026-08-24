@@ -10,7 +10,9 @@
     "selectItem": "选择一个项目",
     "confirm": "确定",
     "notAvailable": "—",
-    "secondsShort": "秒"
+    "secondsShort": "秒",
+    "ready": "就绪",
+    "open": "打开"
   },
   "search": {
     "placeholder": "输入关键词搜索...",
@@ -1137,5 +1139,16 @@
       "name": "计算器",
       "description": "在搜索栏中直接进行数学计算"
     }
+  },
+  "pluginPanel": {
+    "unavailable": {
+      "title": "插件面板不可用",
+      "desc": "插件未提供面板界面（manifest.toml 缺少 [ui].panelEntry），无法渲染面板内容。",
+      "type": "类型: {type}"
+    },
+    "loadError": "面板加载失败: {message}"
+  },
+  "pluginSettings": {
+    "loadError": "设置面板加载失败: {message}"
   }
 }

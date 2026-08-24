@@ -31,7 +31,7 @@ pub async fn handle(
     // （错误详情经日志可观测；UI 通道的错误语义由 bridge_query 的 IPC 错误通道承担）。
     match state
         .get_session_dispatcher()
-        .route_query(&trace_id.0, &query, QueryChannel::Cli)
+        .route_query(&trace_id.0, &query, QueryChannel::Cli, None)
         .await
     {
         Ok(routed) => Json(routed.response),

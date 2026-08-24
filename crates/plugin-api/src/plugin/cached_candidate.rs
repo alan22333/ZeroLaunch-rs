@@ -2,6 +2,7 @@ use crate::plugin::types::{CandidateId, ExecutionTarget, SearchCandidate};
 use dashmap::DashMap;
 use dashmap::Entry;
 use std::collections::HashSet;
+use tracing::{debug, warn};
 
 /// 保存当前已经缓存的候选数据
 pub struct CachedCandidateData {
@@ -39,6 +40,10 @@ impl CachedCandidateData {
     /// 添加一个候选人
     pub fn add_candidate(&mut self, mut candidate: SearchCandidate) {
         if self.has_target(&candidate.target) || self.has_display_name(&candidate.name) {
+            debug!(
+                "候选项已存在，丢弃重复的候选项: target = {:?}, name = {}",
+                candidate.target, candidate.name
+            );
             return;
         }
         let candidate_id = self.next_candidate_id;
@@ -46,6 +51,25 @@ impl CachedCandidateData {
         self.cached_targets.insert(candidate.target.clone());
         self.cached_display_names
             .insert(candidate.name.to_lowercase());
+        self.candidates.push(candidate);
+        self.index.insert(candidate_id, self.candidates.len() - 1);
+        self.next_candidate_id += 1;
+    }
+
+    /// 添加宿主插件候选（沉浸式插件唤醒项）。
+    /// 仅按执行目标去重（target 为 ExecutionTarget::Plugin(id)，注册表保证唯一）；
+    /// 不按展示名去重——插件候选与数据源候选可能同名，互不丢弃。
+    pub fn add_plugin_candidate(&mut self, mut candidate: SearchCandidate) {
+        if self.has_target(&candidate.target) {
+            warn!(
+                "插件候选项已存在，丢弃重复项: target = {:?}",
+                candidate.target
+            );
+            return;
+        }
+        let candidate_id: u64 = self.next_candidate_id;
+        candidate.id = candidate_id;
+        self.cached_targets.insert(candidate.target.clone());
         self.candidates.push(candidate);
         self.index.insert(candidate_id, self.candidates.len() - 1);
         self.next_candidate_id += 1;
