@@ -408,6 +408,8 @@ impl PluginHostManager {
                     );
                     // 先标记 Stopped，让 watchdog 在进程退出后检测到此状态而不触发重启
                     arc.state.write().clone_from(&ProcessState::Stopped);
+                    // 关闭 stdin 阻断 SDK 读循环（防止进程残留），再强杀
+                    arc.client.close_transport();
                     // 通过 PID 强制终止子进程，防止孤儿进程泄漏
                     if let Some(pid) = arc.pid {
                         force_kill_process(pid);

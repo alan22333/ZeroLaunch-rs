@@ -8,6 +8,7 @@
 //! 1. 崩溃 → 自动重启成功，组件重新注册（on_crash/on_restart 各触发一次）
 //! 2. max_restart 超限 → 放弃重启，登记清空且不再有重注册
 //! 3. 组件 id 冲突 → load 被预检拒绝（ComponentIdCollision）
+//! 4. unload → 进程真正退出、插件目录可删除（回归 stdin 不关闭导致的进程残留）
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -284,4 +285,41 @@ async fn colliding_component_id_rejected_on_load() {
     assert!(mgr.plugins.get(plugin_id_a).is_some());
 
     mgr.unload(plugin_id_a).await.expect("unload succeeds");
+}
+
+/// 查询 PID 是否存活（tasklist 精确过滤；无匹配时输出不含 PID）。
+fn process_alive(pid: u32) -> bool {
+    let out = std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {}", pid), "/NH"])
+        .output()
+        .expect("tasklist runs");
+    String::from_utf8_lossy(&out.stdout).contains(&pid.to_string())
+}
+
+/// 场景 4：unload 必须真正终止插件进程，且插件目录可删除。
+/// 回归：shutdown 不关闭 stdin 时进程残留（宿主 client Arc 被 host-call 任务
+/// 循环持有 → stdin 永不关闭 → SDK 读任务无 EOF），remove_dir_all 因 exe 镜像
+/// 被运行中进程锁定而报"拒绝访问"（os error 5）。
+#[tokio::test]
+async fn unload_terminates_plugin_process() {
+    let plugin_id = "com.example.unload-test";
+    let (mgr, _crashed, _restarted) = setup_loaded_plugin("unload-terminates", plugin_id, 3).await;
+
+    let pid = plugin_pid(&mgr, plugin_id);
+    assert!(process_alive(pid), "加载后插件进程应存活");
+
+    mgr.unload(plugin_id).await.expect("unload succeeds");
+
+    // 进程必须真正退出（修复前 stdin 永不关闭，进程残留）
+    wait_until(|| !process_alive(pid), Duration::from_secs(10)).await;
+    assert!(!process_alive(pid), "unload 后插件进程必须退出");
+
+    // 进程退出后 exe 锁释放，插件目录应可完整删除（复现卸载失败的症状）
+    let plugin_dir = std::env::temp_dir()
+        .join(format!(
+            "zl-crash-test-{}-unload-terminates",
+            std::process::id()
+        ))
+        .join("plugin");
+    std::fs::remove_dir_all(&plugin_dir).expect("进程退出后插件目录应可删除");
 }

@@ -159,6 +159,12 @@ impl JsonRpcClient {
         })
     }
 
+    /// 关闭传输：中止写循环，释放子进程 stdin 句柄（EOF 是 SDK 进程的退出信号）。
+    /// 由 shutdown 调用，此后不再发送任何消息。
+    pub fn close_transport(&self) {
+        self._write_handle.abort();
+    }
+
     /// Send a request and wait for the response.
     pub async fn call<P: Serialize, R: DeserializeOwned>(
         &self,

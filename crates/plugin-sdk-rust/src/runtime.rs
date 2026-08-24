@@ -352,8 +352,6 @@ async fn dispatch(
             };
             Ok(serde_json::to_value(result).unwrap_or_default())
         }
-        // todo： 要有具体的处理方法，不可以直接这样返回，比如真的结束这个进程
-        plugin_methods::SHUTDOWN => Ok(serde_json::Value::Null),
         // 返回 metadata
         plugin_methods::GET_METADATA => {
             Ok(serde_json::to_value(app.plugin.metadata()).unwrap_or(serde_json::Value::Null))

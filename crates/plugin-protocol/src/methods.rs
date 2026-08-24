@@ -1,7 +1,6 @@
 /// Host-to-plugin method names (plugin/* namespace).
 pub mod plugin {
     pub const INITIALIZE: &str = "plugin/initialize";
-    pub const SHUTDOWN: &str = "plugin/shutdown";
     pub const GET_METADATA: &str = "plugin/get_metadata";
     pub const GET_COMPONENTS: &str = "plugin/get_components";
     pub const GET_SETTINGS_SCHEMA: &str = "plugin/get_settings_schema";

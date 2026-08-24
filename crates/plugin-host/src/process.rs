@@ -64,6 +64,8 @@ pub struct PluginProcess {
     pub restart_count: u32,
     /// 子进程的 PID，用于强制终止（当优雅关闭超时时兜底）。
     pub pid: Option<u32>,
+    /// watchdog 任务句柄：进程退出时该任务完成，shutdown 据此等待退出。
+    watchdog_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl PluginProcess {
@@ -221,7 +223,7 @@ impl PluginProcess {
             });
         }
 
-        let process = Self {
+        let mut process = Self {
             plugin_id: plugin_id.clone(),
             manifest: manifest.clone(),
             state: Arc::new(RwLock::new(ProcessState::Running)),
@@ -231,10 +233,11 @@ impl PluginProcess {
             crash_tx,
             restart_count,
             pid,
+            watchdog_handle: None,
         };
 
         // Start health monitoring
-        process.spawn_watchdog();
+        process.watchdog_handle = Some(process.spawn_watchdog());
 
         Ok(process)
     }
@@ -407,7 +410,9 @@ impl PluginProcess {
     /// - 否则，将 `plugin_id` 发到 `crash_tx` 上，通知 `PluginHostManager`
     ///   重新拉起。管理者（crash_loop）负责追踪重启次数和强制
     ///   `max_restart` 上限。
-    pub fn spawn_watchdog(&self) {
+    ///
+    /// 任务完成即进程已退出；返回的 JoinHandle 供 shutdown 等待。
+    pub fn spawn_watchdog(&self) -> tokio::task::JoinHandle<()> {
         let plugin_id = self.plugin_id.clone();
         let state = self.state.clone();
         let child_handle = self.child_handle.clone();
@@ -472,38 +477,32 @@ impl PluginProcess {
             if crash_tx.send(plugin_id.clone()).await.is_err() {
                 debug!("Plugin {} crash notification channel closed", plugin_id);
             }
-        });
+        })
     }
 
-    /// Graceful shutdown: send plugin/shutdown, wait, then force-kill if needed.
-    pub async fn shutdown(self, timeout: Duration) {
+    /// 优雅关闭：关闭 stdin（SDK 进程唯一退出路径是 stdin EOF）→
+    /// 等待进程退出（watchdog 完成即进程退出）→ 超时则强杀。
+    pub async fn shutdown(mut self, timeout: Duration) {
         let plugin_id = self.plugin_id.clone();
         let pid = self.pid;
         info!("Shutting down plugin {}", plugin_id);
 
         // Step 1: 先标记 Stopped，让 watchdog 检测到后不触发重启。
-        // 必须早于 force_kill_process，消除进程被杀到状态更新之间的 TOCTOU 窗口。
+        // 必须早于任何终止动作，消除进程退出到状态更新之间的 TOCTOU 窗口。
         *self.state.write() = ProcessState::Stopped;
 
-        // Step 2: 发送优雅关闭 RPC。
-        // 插件正常退出后连接断开，call() 返回 TransportClosed 错误——属于预期行为。
-        let rpc_result = self
-            .client
-            .call::<serde_json::Value, serde_json::Value>(
-                plugin_methods::SHUTDOWN,
-                serde_json::Value::Null,
-                timeout,
-            )
-            .await;
+        // Step 2: 关闭 stdin → SDK 读任务 EOF → 进程自行退出。
+        // 写循环持有 ChildStdin 且随 client Arc 释放才退出（host-call 任务
+        // 持有 clone 形成循环等待），必须显式中止写循环。
+        self.client.close_transport();
 
-        // Step 3: force-kill 兜底。
-        // 仅在 RPC 超时或返回错误时执行（此时进程可能仍存活，PID 有效）；
-        // 若 TransportClosed（进程已退出），跳过 force-kill 以消除 PID 复用风险。
-        let should_force_kill = matches!(
-            rpc_result,
-            Err(ProtocolError::Timeout) | Err(ProtocolError::Rpc { .. })
-        );
-        if should_force_kill {
+        // Step 3: 等待进程退出（watchdog 独占 Child 并 wait，完成即退出），
+        // 超时则强杀（进程卡死无法响应 EOF 时的兜底）。
+        let watchdog = self
+            .watchdog_handle
+            .take()
+            .expect("watchdog 在 spawn 时设置");
+        if tokio::time::timeout(timeout, watchdog).await.is_err() {
             if let Some(pid) = pid {
                 force_kill_process(pid);
             }
