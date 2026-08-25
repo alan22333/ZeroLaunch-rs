@@ -25,17 +25,7 @@ impl ZlpluginProtocolHandler {
         &self,
         uri: &str,
     ) -> Result<(Vec<u8>, String), Box<dyn std::error::Error>> {
-        let resource_path = uri
-            .strip_prefix("http://zlplugin.localhost/")
-            .or_else(|| uri.strip_prefix("https://zlplugin.localhost/"))
-            .or_else(|| uri.strip_prefix("zlplugin://"))
-            .ok_or("not a zlplugin URI")?;
-        let resource_path = resource_path
-            .strip_prefix("localhost/")
-            .unwrap_or(resource_path);
-        let (plugin_id, path) = resource_path
-            .split_once('/')
-            .ok_or("missing plugin asset path")?;
+        let (plugin_id, path) = parse_resource(uri).ok_or("not a zlplugin URI")?;
         if plugin_id.is_empty() || !is_valid_plugin_id(plugin_id) {
             return Err("invalid plugin id".into());
         }
@@ -62,6 +52,20 @@ impl ZlpluginProtocolHandler {
 
 // ── 私有辅助函数 ─────────────────────────────────────────────────
 
+/// 解析 zlplugin URI → (插件 id, 资源路径)；剥离查询参数。非法 URI 返回 None。
+fn parse_resource(uri: &str) -> Option<(&str, &str)> {
+    let resource_path = uri
+        .strip_prefix("http://zlplugin.localhost/")
+        .or_else(|| uri.strip_prefix("https://zlplugin.localhost/"))
+        .or_else(|| uri.strip_prefix("zlplugin://"))?;
+    let resource_path = resource_path
+        .strip_prefix("localhost/")
+        .unwrap_or(resource_path);
+    // 剥离查询串（如 ?v=0.2.0 面板版本失效参数），路径校验基于干净路径
+    let resource_path = resource_path.split('?').next().unwrap_or(resource_path);
+    resource_path.split_once('/')
+}
+
 /// 校验插件 ID 是否符合反向域名格式。
 fn is_valid_plugin_id(id: &str) -> bool {
     use std::sync::LazyLock;
@@ -82,5 +86,35 @@ fn mime_from_extension(path: &Path) -> &'static str {
         Some("ico") => "image/x-icon",
         Some("woff") | Some("woff2") => "font/woff2",
         _ => "application/octet-stream",
+    }
+}
+
+// ── 单元测试 ─────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_resource_supports_scheme_prefixes() {
+        assert_eq!(
+            parse_resource("zlplugin://com.ghost-him.everything/ui/panel.mjs"),
+            Some(("com.ghost-him.everything", "ui/panel.mjs"))
+        );
+        assert_eq!(
+            parse_resource("http://zlplugin.localhost/com.example.hello/ui/panel.mjs?v=0.2.0"),
+            Some(("com.example.hello", "ui/panel.mjs"))
+        );
+        assert_eq!(
+            parse_resource("https://zlplugin.localhost/com.example.hello/ui/panel.mjs?v=0.2.0&x=1"),
+            Some(("com.example.hello", "ui/panel.mjs"))
+        );
+    }
+
+    #[test]
+    fn parse_resource_rejects_invalid() {
+        assert_eq!(parse_resource("http://example.com/x"), None);
+        assert_eq!(parse_resource("zlplugin://localhost/no-plugin-id"), None);
+        assert_eq!(parse_resource("not-a-uri"), None);
     }
 }

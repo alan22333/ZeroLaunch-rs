@@ -17,9 +17,12 @@ let eventsRegistered = false
 /// registrations on reload or duplicate events.
 const registeredThirdPartyIds = new Set<string>()
 
-/** 构造 WebView 可加载的第三方插件资源 URL。 */
-function buildPluginAssetUrl(pluginId: string, entry: string): string {
-  return `http://zlplugin.localhost/${pluginId}/${entry.replace(/^\/+/, '')}`
+/**
+ * 构造 WebView 可加载的第三方插件资源 URL。
+ * 拼上插件版本：升级后 URL 变化，ESM Module Map 不再按旧 URL 返回缓存模块。
+ */
+function buildPluginAssetUrl(pluginId: string, entry: string, version: string): string {
+  return `http://zlplugin.localhost/${pluginId}/${entry.replace(/^\/+/, '')}?v=${encodeURIComponent(version)}`
 }
 
 export function usePluginManager() {
@@ -67,7 +70,7 @@ export function usePluginManager() {
     registeredThirdPartyIds.add(pluginId)
 
     if (ui.panelEntry) {
-      const panelEntryUrl = buildPluginAssetUrl(pluginId, ui.panelEntry as string)
+      const panelEntryUrl = buildPluginAssetUrl(pluginId, ui.panelEntry as string, info.version)
       const wrapper = {
         setup(props: { data: unknown; actions: unknown[] }) {
           return () =>
@@ -92,7 +95,7 @@ export function usePluginManager() {
     }
 
     if (ui.settingsEntry) {
-      const settingsEntryUrl = buildPluginAssetUrl(pluginId, ui.settingsEntry as string)
+      const settingsEntryUrl = buildPluginAssetUrl(pluginId, ui.settingsEntry as string, info.version)
       const wrapper = {
         setup(
           props: { currentSettings: unknown },
