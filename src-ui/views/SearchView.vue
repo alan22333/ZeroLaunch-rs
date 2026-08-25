@@ -1,5 +1,5 @@
 <template>
-  <WindowFrame>
+  <WindowFrame :immersive="uiMode === 'plugin_immersive'">
     <!-- 全页面插件模式：隐藏所有默认 UI -->
     <template v-if="uiMode === 'plugin_immersive'">
       <!-- 全页面插件内容由插件自定义面板渲染 -->
@@ -7,6 +7,7 @@
         v-if="searchStore.panelType"
         :panel-type="searchStore.panelType"
         :panel-data="searchStore.panelData"
+        :immersive="true"
       />
     </template>
 

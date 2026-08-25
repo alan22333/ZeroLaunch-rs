@@ -40,7 +40,11 @@ async function loadSettings() {
     '.fallback { padding: 24px; color: var(--text-error); font-size: var(--font-size-sm); }'
   shadow.appendChild(style)
   const mountEl = document.createElement('div')
-  mountEl.style.height = '100%'
+  mountEl.style.display = 'flex'
+  mountEl.style.flex = '1'
+  mountEl.style.flexDirection = 'column'
+  mountEl.style.minWidth = '0'
+  mountEl.style.minHeight = '0'
   shadow.appendChild(mountEl)
   try {
     const mod = await import(/* @vite-ignore */ props.settingsEntryUrl)

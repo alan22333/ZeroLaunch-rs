@@ -1,5 +1,9 @@
 <template>
-  <div class="plugin-panel-host" data-no-drag>
+  <div
+    class="plugin-panel-host"
+    :class="{ 'plugin-panel-host--immersive': props.immersive }"
+    data-no-drag
+  >
     <component
       :is="panelComponent"
       v-if="panelComponent"
@@ -22,6 +26,7 @@ import { useSearchStore } from '@/stores/search-store'
 const props = defineProps<{
   panelType: string
   panelData: unknown
+  immersive?: boolean
 }>()
 
 const pluginStore = usePluginStore()
@@ -39,11 +44,22 @@ const panelProps = computed(() => ({
 
 <style scoped>
 .plugin-panel-host {
+  display: flex;
   flex: 1;
+  flex-direction: column;
   min-height: 0;
   max-height: 420px; /* 默认最大高度 */
-  overflow-y: auto;
+  overflow: hidden;
   padding: 0;
+}
+
+.plugin-panel-host--immersive {
+  max-height: none;
+}
+
+.plugin-panel-host--immersive > :deep(*) {
+  flex: 1;
+  min-height: 0;
 }
 
 .fallback-panel {

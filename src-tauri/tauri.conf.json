@@ -25,7 +25,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' zlplugin:; script-src 'self' zlplugin: 'unsafe-inline'; style-src 'self' 'unsafe-inline' zlplugin:; connect-src 'self' http://127.0.0.1:* zlplugin:; frame-src zlplugin: data:; img-src 'self' data: zlplugin:; font-src 'self' data: zlplugin:;"
+      "csp": "default-src 'self' http://zlplugin.localhost; script-src 'self' http://zlplugin.localhost 'unsafe-inline'; style-src 'self' 'unsafe-inline' http://zlplugin.localhost; connect-src 'self' http://127.0.0.1:* http://zlplugin.localhost; frame-src http://zlplugin.localhost data:; img-src 'self' data: http://zlplugin.localhost; font-src 'self' data: http://zlplugin.localhost;"
     }
   },
   "bundle": {

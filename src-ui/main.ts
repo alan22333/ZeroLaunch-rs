@@ -23,8 +23,9 @@ async function init() {
   app.mount('#app')
 
   // 加载内置前端插件
-  const { loadBuiltinPlugins } = usePluginManager()
+  const { loadBuiltinPlugins, loadThirdPartyPlugins } = usePluginManager()
   loadBuiltinPlugins()
+  loadThirdPartyPlugins()
 }
 
 init().catch((e) => {

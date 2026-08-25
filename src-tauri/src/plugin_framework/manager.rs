@@ -344,9 +344,9 @@ impl PluginManager {
 
     // ── zlplugin:// 协议处理 ────────────────────────────────────
 
-    /// 处理 `zlplugin://` 协议请求，返回 (文件字节, MIME 类型)。
+    /// 处理第三方插件资源协议请求，返回 (文件字节, MIME 类型)。
     ///
-    /// URI 格式：`zlplugin://<plugin-id>/ui/<sub-path>`
+    /// URI 格式：`http://zlplugin.localhost/<plugin-id>/ui/<sub-path>`
     pub fn handle_zlplugin_uri(
         &self,
         uri: &str,

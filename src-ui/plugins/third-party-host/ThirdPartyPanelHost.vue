@@ -6,7 +6,7 @@ import { useSearchStore } from '@/stores/search-store'
 import { i18n } from '@/i18n'
 
 /**
- * 第三方插件面板宿主：插件 UI（zlplugin:// 资源）动态 import 到宿主 document 的
+ * 第三方插件面板宿主：插件 UI 资源通过宿主协议动态 import 到宿主 document 的
  * Shadow DOM 容器内执行——键盘事件冒泡到宿主窗口（bindings「声明即接管」生效）、
  * i18n 同步直查、数据/动作直连 IPC。Shadow DOM 保留样式隔离。
  */
@@ -78,12 +78,16 @@ async function loadPanel() {
 	style.textContent =
 		'.fallback { padding: 24px; color: var(--text-error); font-size: var(--font-size-sm); }'
 	shadow.appendChild(style)
-	const mountEl = document.createElement('div')
-	mountEl.style.height = '100%'
-	shadow.appendChild(mountEl)
-	try {
-		// 动态 import zlplugin:// 资源（CSP script-src 已允许 zlplugin: 源）
-		const mod = await import(/* @vite-ignore */ props.panelEntryUrl)
+  const mountEl = document.createElement('div')
+  mountEl.style.display = 'flex'
+  mountEl.style.flex = '1'
+  mountEl.style.flexDirection = 'column'
+  mountEl.style.minWidth = '0'
+  mountEl.style.minHeight = '0'
+  shadow.appendChild(mountEl)
+  try {
+    // 动态加载插件资源（CSP 已允许 zlplugin.localhost 源）。
+    const mod = await import(/* @vite-ignore */ props.panelEntryUrl)
 		mountFn = mod.default
 		mountFn?.(mountEl, buildHost())
 	} catch (err) {
@@ -121,7 +125,9 @@ watch(
 
 <style scoped>
 .third-party-panel-host {
+  display: flex;
   width: 100%;
   height: 100%;
+  min-height: 0;
 }
 </style>

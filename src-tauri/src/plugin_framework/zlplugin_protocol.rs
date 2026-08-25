@@ -1,7 +1,7 @@
 //! zlplugin:// 协议处理器。
 //!
 //! 从 PluginManager 中提取的自定义 URI 协议处理职责域，
-//! 处理 `zlplugin://<plugin-id>/ui/<sub-path>` 格式的请求。
+//! 处理 `http://zlplugin.localhost/<plugin-id>/ui/<sub-path>` 格式的请求。
 
 use std::path::{Path, PathBuf};
 
@@ -20,17 +20,23 @@ impl ZlpluginProtocolHandler {
 
     /// 处理 `zlplugin://` 协议请求，返回 (文件字节, MIME 类型)。
     ///
-    /// URI 格式：`zlplugin://<plugin-id>/ui/<sub-path>`
+    /// URI 格式：`zlplugin://localhost/<plugin-id>/ui/<sub-path>`。
     pub(crate) fn handle(
         &self,
         uri: &str,
     ) -> Result<(Vec<u8>, String), Box<dyn std::error::Error>> {
-        let uri = uri
-            .strip_prefix("zlplugin://")
+        let resource_path = uri
+            .strip_prefix("http://zlplugin.localhost/")
+            .or_else(|| uri.strip_prefix("https://zlplugin.localhost/"))
+            .or_else(|| uri.strip_prefix("zlplugin://"))
             .ok_or("not a zlplugin URI")?;
-        let (host, path) = uri.split_once('/').unwrap_or((uri, ""));
-
-        if host.is_empty() || !is_valid_plugin_id(host) {
+        let resource_path = resource_path
+            .strip_prefix("localhost/")
+            .unwrap_or(resource_path);
+        let (plugin_id, path) = resource_path
+            .split_once('/')
+            .ok_or("missing plugin asset path")?;
+        if plugin_id.is_empty() || !is_valid_plugin_id(plugin_id) {
             return Err("invalid plugin id".into());
         }
 
@@ -38,9 +44,8 @@ impl ZlpluginProtocolHandler {
             return Err("access denied: only ui/ path allowed".into());
         }
 
-        let plugin_dir = self.plugins_dir.join(host);
+        let plugin_dir = self.plugins_dir.join(plugin_id);
         let asset_path = plugin_dir.join(path);
-
         // Canonicalize 防路径遍历
         let canonical = asset_path.canonicalize()?;
         let plugin_canonical = plugin_dir.canonicalize()?;

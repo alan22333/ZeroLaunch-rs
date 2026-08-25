@@ -1,6 +1,7 @@
 <template>
   <div
     class="window-frame"
+    :class="{ 'window-frame--immersive': props.immersive }"
     :data-tauri-drag-region="dragEnabled ? '' : null"
     @mousedown="onMouseDown"
   >
@@ -11,6 +12,10 @@
 <script setup lang="ts">
 import { inject, ref, type Ref } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+
+const props = defineProps<{
+  immersive?: boolean
+}>()
 
 const dragEnabled = inject<Ref<boolean>>('isDragEnabled', ref(false))
 
@@ -38,6 +43,10 @@ function onMouseDown(e: MouseEvent) {
   border-radius: var(--window-corner-radius);
   overflow: hidden;
   min-height: calc(var(--search-bar-height) + var(--window-border-width) * 2);
+}
+
+.window-frame--immersive {
+  min-height: calc(var(--result-item-pitch) * var(--max-visible-results) + var(--footer-height));
 }
 
 /* 背景图片层：使用伪元素实现透明度，不影响子元素 */
