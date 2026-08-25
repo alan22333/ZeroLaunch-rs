@@ -11,6 +11,7 @@ pub mod path;
 pub mod resource;
 pub mod shell;
 pub mod storage;
+pub mod theme;
 pub mod timer;
 pub mod window;
 
@@ -34,5 +35,6 @@ pub use path::*;
 pub use resource::*;
 pub use shell::*;
 pub use storage::*;
+pub use theme::{Theme, ThemeProvider};
 pub use timer::{TimerCallback, TimerId, TimerManager, TimerMode, TokioTimerManager};
 pub use window::*;

@@ -19,6 +19,7 @@ use zerolaunch_plugin_api::services::shell::lnk_resolver::LnkResolver;
 use zerolaunch_plugin_api::services::shell::resource_loader::ResourceLoader;
 use zerolaunch_plugin_api::services::shell::ShellExecutor;
 use zerolaunch_plugin_api::services::storage::storage_service::StorageService;
+use zerolaunch_plugin_api::services::theme::ThemeProvider;
 use zerolaunch_plugin_api::services::timer::TimerManager;
 use zerolaunch_plugin_api::services::window::{WindowManager, WindowPosition, WindowPositioner};
 use zerolaunch_plugin_api::services::ParameterSnapshot;
@@ -83,6 +84,10 @@ pub struct HostApi {
     storage: Arc<RwLock<Arc<dyn StorageService>>>,
     /// 应用资源服务
     app_resource: Arc<AppResourceService>,
+    /// 主题提供器（平台实现）
+    theme_provider: Arc<dyn ThemeProvider>,
+    /// 宿主当前主题配置模式（system/light/dark），共享给所有注册句柄
+    theme_mode: Arc<RwLock<String>>,
     /// 通知回调（宿主级）
     notify_callback: RwLock<Arc<dyn Fn(String, String) + Send + Sync + 'static>>,
     /// 隐藏窗口回调（宿主级）
@@ -110,6 +115,8 @@ impl HostApi {
             plugin_id.to_string(),
             config,
             self.capabilities.clone(),
+            self.theme_provider.clone(),
+            self.theme_mode.clone(),
             self.icon_extractor.clone(),
             self.icon_cache.clone(),
             self.shell_executor.clone(),
@@ -195,6 +202,16 @@ impl HostApi {
     /// 显示搜索栏窗口。
     pub async fn show_window(&self) {
         self.show_window_callback.read()();
+    }
+
+    /// 更新宿主主题配置模式，供已注册插件句柄解析实际主题。
+    /// 参数：mode - `system`、`light` 或 `dark`；非法值回退为 `system`。
+    pub fn set_theme_mode(&self, mode: &str) {
+        let normalized = match mode {
+            "light" | "dark" | "system" => mode,
+            _ => "system",
+        };
+        *self.theme_mode.write() = normalized.to_string();
     }
 
     /// 查询搜索栏窗口是否可见。
@@ -393,6 +410,7 @@ pub struct HostApiBuilder {
     storage_service: Option<Arc<dyn StorageService>>,
     app_resource: Option<Arc<AppResourceService>>,
     focus_monitor: Option<Arc<dyn FocusMonitor>>,
+    theme_provider: Option<Arc<dyn ThemeProvider>>,
     clipboard_manager: Option<Arc<dyn ClipboardManager>>,
     notify_callback: Option<Arc<dyn Fn(String, String) + Send + Sync + 'static>>,
     hide_window_callback: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
@@ -429,6 +447,7 @@ impl HostApiBuilder {
             storage_service: None,
             app_resource: None,
             focus_monitor: None,
+            theme_provider: None,
             clipboard_manager: None,
             notify_callback: None,
             hide_window_callback: None,
@@ -593,6 +612,14 @@ impl HostApiBuilder {
         self
     }
 
+    /// 设置系统主题提供器。
+    /// 参数：theme_provider - 平台实现的系统主题查询能力。
+    /// 返回：Self（支持链式调用）。
+    pub fn theme_provider(mut self, theme_provider: Arc<dyn ThemeProvider>) -> Self {
+        self.theme_provider = Some(theme_provider);
+        self
+    }
+
     /// 设置剪贴板管理器。
     /// 参数：clipboard_manager - 剪贴板管理器实例。
     /// 返回：Self（支持链式调用）。
@@ -731,6 +758,10 @@ impl HostApiBuilder {
             app_resource: self
                 .app_resource
                 .ok_or(HostApiBuildError::MissingComponent("app_resource"))?,
+            theme_provider: self
+                .theme_provider
+                .ok_or(HostApiBuildError::MissingComponent("theme_provider"))?,
+            theme_mode: Arc::new(RwLock::new("system".to_string())),
             focus_monitor: self
                 .focus_monitor
                 .ok_or(HostApiBuildError::MissingComponent("focus_monitor"))?,

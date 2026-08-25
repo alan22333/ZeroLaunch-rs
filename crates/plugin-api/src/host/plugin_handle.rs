@@ -17,6 +17,7 @@ use crate::services::shell::lnk_resolver::LnkResolver;
 use crate::services::shell::resource_loader::ResourceLoader;
 use crate::services::shell::ShellExecutor;
 use crate::services::storage::storage_service::StorageService;
+use crate::services::theme::{Theme, ThemeProvider};
 use crate::services::timer::types::{TimerCallback, TimerId, TimerMode};
 use crate::services::timer::TimerManager;
 use crate::services::window::WindowManager;
@@ -67,6 +68,10 @@ pub struct PluginHandle {
     focus_monitor: Arc<dyn FocusMonitor>,
     /// 剪贴板管理器，由 HostApi 注入
     clipboard_manager: Arc<dyn ClipboardManager>,
+    /// 主题提供器，由 HostApi 注入（system 模式时查询系统主题）
+    theme_provider: Arc<dyn ThemeProvider>,
+    /// 宿主当前主题配置模式（system/light/dark），由 HostApi 共享
+    theme_mode: Arc<RwLock<String>>,
 }
 
 impl PluginHandle {
@@ -76,6 +81,8 @@ impl PluginHandle {
         plugin_id: String,
         config: PluginSdkConfig,
         capabilities: PlatformCapabilities,
+        theme_provider: Arc<dyn ThemeProvider>,
+        theme_mode: Arc<RwLock<String>>,
         icon_extractor: Arc<dyn IconExtractor>,
         icon_cache: Arc<IconCacheService>,
         shell_executor: Arc<dyn ShellExecutor>,
@@ -98,6 +105,8 @@ impl PluginHandle {
             plugin_id,
             config: RwLock::new(config),
             capabilities,
+            theme_provider,
+            theme_mode,
             icon_extractor,
             icon_cache,
             shell_executor,
@@ -327,6 +336,16 @@ impl PluginHandle {
     /// 返回：平台能力的不可变引用。
     pub fn capabilities(&self) -> &PlatformCapabilities {
         &self.capabilities
+    }
+
+    /// 查询宿主当前实际生效的界面主题。
+    /// 显式 light/dark 配置直接返回；system 模式委托平台读取系统主题。
+    pub fn get_theme(&self) -> Result<Theme, HostApiError> {
+        match self.theme_mode.read().as_str() {
+            "light" => Ok(Theme::Light),
+            "dark" => Ok(Theme::Dark),
+            _ => self.theme_provider.current_system_theme(),
+        }
     }
 
     // ===== 参数解析服务 =====

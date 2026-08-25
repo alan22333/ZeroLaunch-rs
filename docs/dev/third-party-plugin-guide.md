@@ -44,6 +44,23 @@
 插件 UI 统一内嵌执行（Shadow DOM + 动态 import `zlplugin://` 资源），
 无 iframe、无 postMessage 桥、无 CLI HTTP 依赖。
 
+### 面板主题跟随宿主
+
+自定义面板运行在宿主 Shadow DOM 内，**样式应直接使用宿主 CSS 变量**
+（`--bg-primary`、`--text-primary`、`--text-secondary`、`--border-color`、
+`--accent-color`、`--primary-color-alpha` 等，定义见 `variables.css` 与
+`applyAppearanceSettings`）。自定义属性穿过 Shadow DOM 边界继承，宿主切换
+浅色/深色主题时面板自动跟随，无需任何 IPC 或轮询。
+
+插件进程如需主题信息（如按主题调整逻辑），使用宿主主题查询能力：
+
+```rust
+let theme = host().get_theme().await?; // "light" 或 "dark"
+```
+
+返回宿主**实际生效**主题：配置为 `system` 时由宿主解析系统主题后返回最终值，
+插件无需感知（也不需要监听配置——所缺状态按需查询即可）。
+
 ## 快速开始（Rust）
 
 ### 1. 创建项目

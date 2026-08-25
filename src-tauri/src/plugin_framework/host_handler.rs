@@ -4,6 +4,7 @@ use base64::Engine;
 use std::sync::Arc;
 use tauri::AppHandle;
 use zerolaunch_plugin_api::host::OpenTarget;
+use zerolaunch_plugin_api::services::Theme;
 use zerolaunch_plugin_host::host_dispatch::HostCallHandler;
 use zerolaunch_plugin_protocol::{codes, JsonRpcError};
 
@@ -206,6 +207,17 @@ impl HostCallHandler for TauriHostCallHandler {
             }
             // 查询宿主当前界面语言（如 "zh-Hans"），插件按需本地化动态文本。
             host::GET_LOCALE => Ok(serde_json::json!(self.i18n.current_language())),
+            // 查询宿主当前实际生效主题，system 模式由 PluginHandle 解析。
+            host::GET_THEME => {
+                let theme = match handle
+                    .get_theme()
+                    .map_err(|e| JsonRpcError::new(codes::PLUGIN_ERROR, e.to_string()))?
+                {
+                    Theme::Light => "light",
+                    Theme::Dark => "dark",
+                };
+                Ok(serde_json::json!(theme))
+            }
             _ => Err(JsonRpcError::new(
                 codes::METHOD_NOT_FOUND,
                 format!("host method not found: {}", method),

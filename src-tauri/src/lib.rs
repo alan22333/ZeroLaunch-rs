@@ -38,6 +38,7 @@ use zerolaunch_platform_windows::WindowsPathResolver;
 use zerolaunch_platform_windows::WindowsResourceLoader;
 use zerolaunch_platform_windows::WindowsSelectionProvider;
 use zerolaunch_platform_windows::WindowsShellExecutor;
+use zerolaunch_platform_windows::WindowsThemeProvider;
 use zerolaunch_platform_windows::WindowsWindowHandleProvider;
 use zerolaunch_platform_windows::WindowsWindowManager;
 use zerolaunch_platform_windows::WindowsWindowPositioner;
@@ -248,10 +249,9 @@ pub fn run() {
                 });
             }
             tauri::RunEvent::WindowEvent {
-                label,
                 event: tauri::WindowEvent::ThemeChanged(theme),
                 ..
-            } if label == "main" => {
+            } => {
                 let theme_str = match theme {
                     tauri::Theme::Dark => "dark",
                     tauri::Theme::Light => "light",
@@ -301,6 +301,7 @@ fn build_windows_host_api_builder(
         .app_resource(app_resource)
         .clipboard_manager(Arc::new(WindowsClipboardManager::new()))
         .window_positioner(Arc::new(WindowsWindowPositioner::new()))
+        .theme_provider(Arc::new(WindowsThemeProvider::new()))
 }
 
 /// 初始化搜索栏窗口。

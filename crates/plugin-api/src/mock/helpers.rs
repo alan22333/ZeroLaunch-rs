@@ -25,6 +25,8 @@ pub fn mock_plugin_handle() -> Arc<PluginHandle> {
         "__mock__".to_string(),
         PluginSdkConfig::default(),
         PlatformCapabilities::new(HashSet::new()),
+        Arc::new(StubThemeProvider),
+        Arc::new(RwLock::new("light".to_string())),
         Arc::new(StubIconExtractor),
         Arc::new(icon_cache),
         Arc::new(StubShellExecutor::default()),

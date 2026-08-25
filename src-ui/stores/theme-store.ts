@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { darkTheme, type GlobalTheme } from 'naive-ui'
 import { configGetSettings, configApplySettings } from '@/bridge/commands'
+import { onSystemThemeChanged } from '@/bridge/events'
 import { applyAppearanceSettings, extractPlaceholder } from '@/utils/appearance'
 
 export type ThemeMode = 'system' | 'light' | 'dark'
@@ -22,22 +23,14 @@ function detectSystemPreference(): boolean {
 
 export const useThemeStore = defineStore('theme', () => {
   const themeMode = ref<ThemeMode>('system')
+  // 启动初始值：检测一次系统主题避免首帧闪烁；
+  // 运行期以系统主题变化事件为权威源（onSystemThemeChanged）。
   const systemIsDark = ref(detectSystemPreference())
   const naiveTheme = ref<GlobalTheme | null>(null)
   const locale = ref<Locale>('zh-Hans')
 
   /** 搜索栏占位符文本（响应式，直接绑定到 SearchBar 的 placeholder 属性） */
   const searchBarPlaceholder = ref('Hello, ZeroLaunch! ヾ(≧▽≦*)o')
-
-  let systemMediaQuery: MediaQueryList | null = null
-
-  /** 系统主题变化回调。applyNaiveTheme 内部有异步图片解析，此处 fire-and-forget 即可 */
-  function onSystemChange(e: MediaQueryListEvent) {
-    systemIsDark.value = e.matches
-    if (themeMode.value === 'system') {
-      applyNaiveTheme()
-    }
-  }
 
   /** 应用 Naive UI 主题并重新计算 CSS 变量（含背景图片异步解析） */
   async function applyNaiveTheme() {
@@ -102,8 +95,13 @@ export const useThemeStore = defineStore('theme', () => {
     }
     await applyNaiveTheme()
 
-    systemMediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-    systemMediaQuery.addEventListener('change', onSystemChange)
+    // 系统主题变化由后端权威推送（lib.rs ThemeChanged → system-theme-changed）
+    onSystemThemeChanged((isDark) => {
+      systemIsDark.value = isDark
+      if (themeMode.value === 'system') {
+        applyNaiveTheme()
+      }
+    })
 
     return lang
   }
@@ -140,10 +138,6 @@ export const useThemeStore = defineStore('theme', () => {
     return { langChanged, newLang: l }
   }
 
-  function stopSystemListener() {
-    systemMediaQuery?.removeEventListener('change', onSystemChange)
-  }
-
   return {
     themeMode,
     naiveTheme,
@@ -153,6 +147,5 @@ export const useThemeStore = defineStore('theme', () => {
     loadFromBackend,
     applyRemoteAppearance,
     applyRemoteGeneral,
-    stopSystemListener,
   }
 })

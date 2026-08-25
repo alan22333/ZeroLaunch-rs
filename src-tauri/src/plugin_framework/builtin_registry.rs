@@ -297,8 +297,20 @@ mod tests {
     use zerolaunch_plugin_api::mock::*;
     use zerolaunch_plugin_api::services::resource::AppResourceService;
     use zerolaunch_plugin_api::services::storage::storage_service::StorageService;
+    use zerolaunch_plugin_api::services::theme::{Theme, ThemeProvider};
     use zerolaunch_plugin_api::services::timer::TokioTimerManager;
+    use zerolaunch_plugin_api::HostApiError;
     use zerolaunch_plugin_api::PlatformCapabilities;
+
+    /// 测试主题提供器，固定返回浅色主题。
+    struct StubThemeProvider;
+
+    impl ThemeProvider for StubThemeProvider {
+        /// 返回固定浅色主题供测试 HostApi 构造。
+        fn current_system_theme(&self) -> Result<Theme, HostApiError> {
+            Ok(Theme::Light)
+        }
+    }
 
     /// 构建仅含桩组件的 HostApi（测试专用，不触达真实平台能力）。
     /// 镜像 lib.rs::build_windows_host_api_builder 的组件清单。
@@ -329,6 +341,7 @@ mod tests {
             .focus_monitor(Arc::new(StubFocusMonitor))
             .clipboard_manager(Arc::new(StubClipboardManager))
             .notify_callback(|_, _| {})
+            .theme_provider(Arc::new(StubThemeProvider))
             .hide_window_callback(|| {})
             .show_window_callback(|| {})
             .is_window_visible_callback(|| false)

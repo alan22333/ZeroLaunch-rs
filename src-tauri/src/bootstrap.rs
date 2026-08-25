@@ -30,6 +30,7 @@ use crate::core::i18n::I18nManager;
 use crate::plugin_framework::inspector::Inspector;
 use crate::plugin_framework::manager::PluginManager;
 use crate::plugin_framework::plugin_wake_executor::PluginWakeExecutor;
+use crate::sdk::HostApi;
 use crate::state::app_state::AppState;
 use crate::tray::TrayManager;
 use crate::utils::trace_id::generate_trace_id;
@@ -344,6 +345,16 @@ fn sync_backend_language(state: &Arc<AppState>, config_manager: &ConfigManager) 
     }
 }
 
+/// 将外观配置中的主题模式同步到 HostApi，供插件查询实际主题。
+fn sync_backend_theme(host_api: &HostApi, config_manager: &ConfigManager) {
+    let theme = config_manager
+        .get_settings("appearance-config")
+        .and_then(|s| s.get("theme").and_then(|v| v.as_str()).map(str::to_string));
+    if let Some(theme) = theme {
+        host_api.set_theme_mode(&theme);
+    }
+}
+
 /// 初始化插件系统。
 ///
 /// 核心流程：
@@ -394,6 +405,10 @@ pub(crate) async fn init_plugin_system(state: &Arc<AppState>) -> HashSet<String>
                                 "componentType": format!("{:?}", component_type),
                             }),
                         );
+                        // 外观配置变更时同步主题模式到 HostApi（插件 get_theme 查询）
+                        if component_id == "appearance-config" {
+                            sync_backend_theme(&host_api_for_events, &cm_for_events);
+                        }
                         // 语言切换时同步后端翻译服务并重建托盘菜单（即时生效）
                         if component_id == "general-config" {
                             sync_backend_language(&state_for_events, &cm_for_events);
@@ -591,6 +606,7 @@ pub(crate) async fn init_plugin_system(state: &Arc<AppState>) -> HashSet<String>
     if let Err(e) = config_manager.load_from_storage().await {
         warn!("加载持久化配置失败: {}", e);
     }
+    sync_backend_theme(&state.get_host_api(), &config_manager);
     // 持久化语言在配置加载后才可知：同步后端翻译服务并重建托盘菜单
     sync_backend_language(state, &config_manager);
 

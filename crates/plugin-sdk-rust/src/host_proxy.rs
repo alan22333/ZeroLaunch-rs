@@ -172,6 +172,17 @@ impl HostProxy {
         Ok(result.as_str().unwrap_or("").to_string())
     }
 
+    /// 查询宿主当前实际生效主题，返回 `light` 或 `dark`。
+    pub async fn get_theme(&self) -> Result<String, String> {
+        let result = self
+            .send_request("host/theme.get", serde_json::Value::Null)
+            .await?;
+        result
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| "host theme response is not a string".to_string())
+    }
+
     pub async fn enumerate_apps(&self) -> Result<serde_json::Value, String> {
         self.send_request("host/app.enumerate", serde_json::json!(null))
             .await

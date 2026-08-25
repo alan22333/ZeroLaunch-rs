@@ -33,6 +33,18 @@ use crate::services::window::window_positioner::{
 };
 use crate::services::window::WindowManager;
 
+// ===== Theme Provider =====
+
+/// 固定返回浅色主题的主题提供器桩，供测试构造 PluginHandle。
+pub struct StubThemeProvider;
+
+impl crate::services::theme::ThemeProvider for StubThemeProvider {
+    /// 返回浅色主题，不触达真实系统主题。
+    fn current_system_theme(&self) -> Result<crate::services::Theme, HostApiError> {
+        Ok(crate::services::Theme::Light)
+    }
+}
+
 // ===== Icon Extractor =====
 
 pub struct StubIconExtractor;

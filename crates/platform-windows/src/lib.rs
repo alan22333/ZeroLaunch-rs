@@ -16,6 +16,7 @@ mod parameter_providers;
 mod path_resolver;
 mod resource_loader;
 mod shell;
+mod theme;
 mod utils;
 mod window;
 mod window_positioner;
@@ -37,5 +38,6 @@ pub use parameter_providers::{
 pub use path_resolver::WindowsPathResolver;
 pub use resource_loader::WindowsResourceLoader;
 pub use shell::WindowsShellExecutor;
+pub use theme::WindowsThemeProvider;
 pub use window::WindowsWindowManager;
 pub use window_positioner::WindowsWindowPositioner;
