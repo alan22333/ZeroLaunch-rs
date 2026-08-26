@@ -38,6 +38,6 @@ pub use parameter_providers::{
 pub use path_resolver::WindowsPathResolver;
 pub use resource_loader::WindowsResourceLoader;
 pub use shell::WindowsShellExecutor;
-pub use theme::WindowsThemeProvider;
+pub use theme::{start_system_theme_monitor, WindowsThemeProvider};
 pub use window::WindowsWindowManager;
 pub use window_positioner::WindowsWindowPositioner;

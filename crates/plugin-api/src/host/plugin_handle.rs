@@ -348,6 +348,11 @@ impl PluginHandle {
         }
     }
 
+    /// 查询系统主题（未应用宿主显式 light/dark 配置），供前端 system 模式跟随。
+    pub fn get_system_theme(&self) -> Result<Theme, HostApiError> {
+        self.theme_provider.current_system_theme()
+    }
+
     // ===== 参数解析服务 =====
 
     /// 解析参数模板

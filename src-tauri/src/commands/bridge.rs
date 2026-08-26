@@ -539,3 +539,20 @@ pub async fn bridge_hide_window(state: tauri::State<'_, Arc<AppState>>) -> Resul
     state.get_host_api().hide_window().await;
     Ok(())
 }
+
+/// 查询系统主题（"light"/"dark"），未经宿主显式配置解析。
+/// 前端 system 模式跟随的唯一数据源：初始值经本命令获取，运行期变化经
+/// system-theme-changed 事件推送（两者语义一致，见 bootstrap 注册表监听）。
+#[tauri::command]
+#[tracing::instrument(skip(state), fields(trace_id))]
+pub fn bridge_get_system_theme(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<String, BridgeError> {
+    let trace_id = crate::utils::trace_id::generate_trace_id();
+    tracing::Span::current().record("trace_id", trace_id.as_str());
+    let theme = state
+        .get_core_handle()
+        .get_system_theme()
+        .with_trace_id(&trace_id)?;
+    Ok(theme.as_str().to_string())
+}

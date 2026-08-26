@@ -11,6 +11,16 @@ pub enum Theme {
     Dark,
 }
 
+impl Theme {
+    /// 主题短名称（"light"/"dark"），用于事件载荷与日志文本。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Theme::Light => "light",
+            Theme::Dark => "dark",
+        }
+    }
+}
+
 /// 提供宿主当前实际生效主题的平台能力。
 ///
 /// 由平台层实现并注入 HostApi，PluginHandle 仅负责向插件转发查询结果。

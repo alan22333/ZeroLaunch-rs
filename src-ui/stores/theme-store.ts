@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { darkTheme, type GlobalTheme } from 'naive-ui'
-import { configGetSettings, configApplySettings } from '@/bridge/commands'
+import { bridgeGetSystemTheme, configGetSettings, configApplySettings } from '@/bridge/commands'
 import { onSystemThemeChanged } from '@/bridge/events'
 import { applyAppearanceSettings, extractPlaceholder } from '@/utils/appearance'
 
@@ -13,19 +13,10 @@ function normalizeLocale(lang: unknown): Locale {
   return lang === 'en' || lang === 'zh-Hant' ? lang : 'zh-Hans'
 }
 
-function detectSystemPreference(): boolean {
-  try {
-    return window.matchMedia('(prefers-color-scheme: dark)').matches
-  } catch {
-    return false
-  }
-}
-
 export const useThemeStore = defineStore('theme', () => {
   const themeMode = ref<ThemeMode>('system')
-  // 启动初始值：检测一次系统主题避免首帧闪烁；
-  // 运行期以系统主题变化事件为权威源（onSystemThemeChanged）。
-  const systemIsDark = ref(detectSystemPreference())
+  // 系统主题唯一数据源为后端（初始值经查询、变化经事件），未加载前默认浅色
+  const systemIsDark = ref(false)
   const naiveTheme = ref<GlobalTheme | null>(null)
   const locale = ref<Locale>('zh-Hans')
 
@@ -93,15 +84,24 @@ export const useThemeStore = defineStore('theme', () => {
       console.warn('[theme-store] Failed to load config, using defaults')
       themeMode.value = 'system'
     }
-    await applyNaiveTheme()
 
-    // 系统主题变化由后端权威推送（lib.rs ThemeChanged → system-theme-changed）
+    // 系统主题唯一数据源：初始值经后端查询（后端读注册表 AppsUseLightTheme），
+    // 运行期变化经 system-theme-changed 事件推送（后端注册表监听驱动）。
+    // 先注册事件监听再查询：查询窗口期内的事件不丢失，查询值（最新系统值）覆盖语义一致。
     onSystemThemeChanged((isDark) => {
       systemIsDark.value = isDark
       if (themeMode.value === 'system') {
         applyNaiveTheme()
       }
     })
+
+    try {
+      systemIsDark.value = (await bridgeGetSystemTheme()) === 'dark'
+    } catch {
+      // 查询失败保持当前值，事件到达后修正
+    }
+
+    await applyNaiveTheme()
 
     return lang
   }

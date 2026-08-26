@@ -765,3 +765,20 @@ fn spawn_app_command_consumer(
         }
     });
 }
+
+/// 注册系统主题变化监控（宿主侧回调）。
+///
+/// 平台实现见 `zerolaunch_platform_windows::start_system_theme_monitor`（进程内单例）；
+/// 由 setup 在应用启动时调用一次，主题变化时推送前端事件并记录日志。
+pub(crate) fn init_system_theme_monitor(app_handle: tauri::AppHandle) {
+    use zerolaunch_platform_windows::start_system_theme_monitor;
+    use zerolaunch_plugin_api::services::Theme;
+
+    if let Err(error) = start_system_theme_monitor(move |theme: Theme| {
+        let payload = theme.as_str();
+        info!(payload, "系统主题变化");
+        let _ = app_handle.emit("system-theme-changed", payload);
+    }) {
+        warn!(error = %error, "系统主题监控启动失败");
+    }
+}

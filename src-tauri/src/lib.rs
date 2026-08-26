@@ -128,6 +128,8 @@ pub fn run() {
         })
         .manage(Arc::new(AppState::new()))
         .setup(move |app| {
+            // AppHandle 副本供主题监听回调使用
+            let app_handle_for_theme = app.handle().clone();
             let app_data_dir = path_resolver.resolve_path(KnownPath::AppDataDir).unwrap();
             let icon_cache_dir = path_resolver
                 .resolve_path(KnownPath::AppIconCacheDir)
@@ -187,6 +189,10 @@ pub fn run() {
 
                 info!("应用启动完成");
             });
+
+            // 系统主题监控：平台实现见 platform-windows，宿主注册回调推送前端事件
+            bootstrap::init_system_theme_monitor(app_handle_for_theme);
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -199,6 +205,7 @@ pub fn run() {
             crate::commands::bridge::bridge_refresh_candidates,
             crate::commands::bridge::bridge_get_candidates_count,
             crate::commands::bridge::bridge_hide_window,
+            crate::commands::bridge::bridge_get_system_theme,
             // Bridge: 配置管理
             crate::commands::config_file::config_get_version,
             crate::commands::config_file::config_get_all_components,

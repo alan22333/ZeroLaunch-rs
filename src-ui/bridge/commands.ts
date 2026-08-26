@@ -84,6 +84,10 @@ export function bridgeGetCandidatesCount(): Promise<number> {
   return invokeCommand<number>('bridge_get_candidates_count')
 }
 
+export function bridgeGetSystemTheme(): Promise<string> {
+  return invokeCommand<string>('bridge_get_system_theme')
+}
+
 export function bridgeHideWindow(): Promise<void> {
   return invokeCommand<void>('bridge_hide_window')
 }
