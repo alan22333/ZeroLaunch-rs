@@ -88,7 +88,9 @@ const columns: DataTableColumn<PluginRow>[] = [
     renderExpand(row) {
       const comps = row.componentIds
         .map((id) => configStore.components[id])
-        .filter((c): c is ComponentInfo => !!c)
+        // 只展示插件本身（Plugin 类型组件）的配置；
+        // 管道组件（DataSource/ScoreBooster 等）配置由搜索管道页按位置展示。
+        .filter((c): c is ComponentInfo => !!c && c.componentType === 'Plugin')
       if (comps.length === 0) {
         return h(NText, { depth: 3 }, { default: () => t('settings.thirdPartyPlugins.noConfig') })
       }
