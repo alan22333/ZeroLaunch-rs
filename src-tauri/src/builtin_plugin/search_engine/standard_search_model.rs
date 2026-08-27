@@ -48,6 +48,7 @@ impl Configurable for StandardSearchModel {
     }
 }
 
+#[async_trait]
 impl SearchEngine for StandardSearchModel {
     /// 批量计算候选项与查询的匹配分数
     ///
@@ -57,7 +58,7 @@ impl SearchEngine for StandardSearchModel {
     ///
     /// # Returns
     /// * 按原始数据排列的 `ScoredCandidate` 列表，包含详细评分明细
-    fn calculate_scores(
+    async fn calculate_scores(
         &self,
         candidates: &CachedCandidateData,
         query: &str,

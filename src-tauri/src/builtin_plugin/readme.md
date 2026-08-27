@@ -316,19 +316,20 @@ impl Configurable for ProgramSource {
 
 // 2. 实现 DataSource（核心功能）
 impl DataSource for ProgramSource {
-    fn fetch_candidates(&self) -> CachedCandidateData {
-        let candidates = self.programs.iter().map(|p| {
-            SearchCandidate {
-                id: p.program_guid,
+        async fn fetch_candidates(&self) -> CachedCandidateData {
+        let mut cache = CachedCandidateData::new();
+        for p in &self.programs {
+            // id 由缓存顺序分配（宿主侧同样重新分配），插件侧无需指定
+            cache.add_candidate(SearchCandidate {
                 name: p.show_name.clone(),
                 icon: p.icon_request_json.clone(),
                 target: p.target.clone().into(),
                 keywords: p.search_keywords.clone(),
                 bias: p.stable_bias,
-            }
-        }).collect();
-        
-        CachedCandidateData::from_candidates(candidates)
+                trigger_keywords: Vec::new(),
+            });
+        }
+        cache
     }
 }
 ```

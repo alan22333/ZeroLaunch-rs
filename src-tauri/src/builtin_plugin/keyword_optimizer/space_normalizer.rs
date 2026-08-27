@@ -118,8 +118,9 @@ impl Configurable for SpaceNormalizer {
     }
 }
 
+#[async_trait]
 impl KeywordOptimizer for SpaceNormalizer {
-    fn optimize(&self, keyword: &str) -> Vec<String> {
+    async fn optimize(&self, keyword: &str) -> Vec<String> {
         self.inner.read().optimize(keyword)
     }
 

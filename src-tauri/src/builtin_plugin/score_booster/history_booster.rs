@@ -247,9 +247,10 @@ impl Configurable for HistoryBooster {
     }
 }
 
+#[async_trait]
 impl ScoreBooster for HistoryBooster {
     /// 记录候选项被选中启动
-    fn record(&self, candidate_id: CandidateId, data: &CachedCandidateData, _query: &str) {
+    async fn record(&self, candidate_id: CandidateId, data: &CachedCandidateData, _query: &str) {
         if let Some(search_candidate) = data.get_candidate(candidate_id) {
             let method_text = search_candidate.target.payload();
             self.inner.write().record_launch(method_text);
@@ -262,7 +263,7 @@ impl ScoreBooster for HistoryBooster {
     }
 
     /// 基于历史启动数据增强候选项分数
-    fn boost(
+    async fn boost(
         &self,
         candidates: &mut Vec<ScoredCandidate>,
         data: &CachedCandidateData,

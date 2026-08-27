@@ -126,8 +126,9 @@ impl Configurable for FirstLetterExtractor {
     }
 }
 
+#[async_trait]
 impl KeywordOptimizer for FirstLetterExtractor {
-    fn optimize(&self, keyword: &str) -> Vec<String> {
+    async fn optimize(&self, keyword: &str) -> Vec<String> {
         self.inner.read().optimize(keyword)
     }
 

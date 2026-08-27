@@ -81,10 +81,10 @@ impl CandidatePipeline {
         let injectors: Vec<&dyn KeywordInjector> =
             self.keyword_injectors.iter().map(|a| a.as_ref()).collect();
 
-        let processed: Vec<SearchCandidate> = raw
-            .into_iter()
-            .map(|c| self.process_candidate(c, &sorted, &injectors))
-            .collect();
+        let mut processed = Vec::with_capacity(raw.len());
+        for c in raw {
+            processed.push(self.process_candidate(c, &sorted, &injectors).await);
+        }
 
         // 统一去重 + 分配 id（重建索引）
         let mut candidates = CachedCandidateData::new();
@@ -97,16 +97,16 @@ impl CandidatePipeline {
     /// 对单个候选运行完整关键字处理流水线（纯函数，值进值出）：
     /// 保留候选自带 keywords → 名称派生（优化器链）→ 注入器 → 去重 → 固定偏置。
     /// `sorted` / `injectors` 由调用方一次性构建传入。
-    pub fn process_candidate(
+    pub async fn process_candidate(
         &self,
         mut candidate: SearchCandidate,
         sorted: &[&dyn KeywordOptimizer],
         injectors: &[&dyn KeywordInjector],
     ) -> SearchCandidate {
         let mut keywords = std::mem::take(&mut candidate.keywords);
-        keywords.extend(Self::apply_keyword_optimizers(&candidate.name, sorted));
+        keywords.extend(Self::apply_keyword_optimizers(&candidate.name, sorted).await);
         for injector in injectors {
-            keywords.extend(injector.inject_keywords(&candidate));
+            keywords.extend(injector.inject_keywords(&candidate).await);
         }
         candidate.keywords = Self::deduplicate_keywords(keywords);
         let target = candidate.target.payload().to_ascii_lowercase();
@@ -118,16 +118,17 @@ impl CandidatePipeline {
 
     /// 对单个名称运行优化器链，返回去重后的关键字列表。
     /// 参数 `sorted` 必须已按 `get_priority()` 升序排列。
-    fn apply_keyword_optimizers(name: &str, sorted: &[&dyn KeywordOptimizer]) -> Vec<String> {
+    async fn apply_keyword_optimizers(name: &str, sorted: &[&dyn KeywordOptimizer]) -> Vec<String> {
         let mut accumulated: Vec<String> = vec![name.to_string()];
         for optimizer in sorted {
             let new_keywords = if optimizer.uses_context() {
-                accumulated
-                    .iter()
-                    .flat_map(|kw| optimizer.optimize(kw))
-                    .collect()
+                let mut out = Vec::new();
+                for kw in &accumulated {
+                    out.extend(optimizer.optimize(kw).await);
+                }
+                out
             } else {
-                optimizer.optimize(name)
+                optimizer.optimize(name).await
             };
             accumulated.extend(new_keywords);
         }
@@ -144,11 +145,11 @@ impl CandidatePipeline {
 
     /// 调试用：对单个名称运行关键字优化器链，返回所有生成的关键字。
     /// 不修改候选项缓存。内部自行排序后调用共享逻辑。
-    pub fn generate_keywords_for_name(&self, name: &str) -> Vec<String> {
+    pub async fn generate_keywords_for_name(&self, name: &str) -> Vec<String> {
         let mut sorted: Vec<&dyn KeywordOptimizer> =
             self.keyword_optimizers.iter().map(|a| a.as_ref()).collect();
         sorted.sort_by_key(|op| op.get_priority());
-        Self::apply_keyword_optimizers(name, &sorted)
+        Self::apply_keyword_optimizers(name, &sorted).await
     }
 
     /// 根据 component_id 查找已注册的 Configurable 组件。

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
+use tracing::warn;
 use zerolaunch_plugin_api::{
     DataSource, KeywordInjector, KeywordOptimizer, ScoreBooster, SearchEngine,
 };
@@ -85,9 +86,24 @@ impl PluginComponentRegistry {
         self.keyword_injectors.write().remove(component_id);
     }
 
+    /// 注销一个搜索引擎（按 component_id）。
+    pub fn unregister_search_engine(&self, component_id: &str) {
+        self.search_engines.write().remove(component_id);
+    }
+
+    /// 注销一个分数增强器（按 component_id）。
+    pub fn unregister_score_booster(&self, component_id: &str) {
+        self.score_boosters.write().remove(component_id);
+    }
+
     /// 检查是否存在指定 ID 的搜索引擎。
     pub fn contains_engine(&self, component_id: &str) -> bool {
         self.search_engines.read().contains_key(component_id)
+    }
+
+    /// 当前注册的所有搜索引擎 component_id（供引擎互斥遍历）。
+    pub fn search_engine_ids(&self) -> Vec<String> {
+        self.search_engines.read().keys().cloned().collect()
     }
 
     /// 根据当前注册表重建候选管道（仅包含启用的组件）。
@@ -129,10 +145,28 @@ impl PluginComponentRegistry {
         top_k: usize,
     ) -> Option<SearchPipeline> {
         let engines = self.search_engines.read();
-        let enabled_engine = engines
+        let mut enabled_engines: Vec<Arc<dyn SearchEngine>> = engines
             .values()
-            .find(|e| cm.is_enabled(e.component_id()))
-            .cloned();
+            .filter(|e| cm.is_enabled(e.component_id()))
+            .cloned()
+            .collect();
+        if enabled_engines.len() > 1 {
+            warn!(
+                "存在 {} 个启用的搜索引擎，按 (priority, component_id) 确定性选取: {:?}",
+                enabled_engines.len(),
+                enabled_engines
+                    .iter()
+                    .map(|e| e.component_id())
+                    .collect::<Vec<_>>()
+            );
+        }
+        // 确定性选取：priority 小者优先，同优先级按 component_id 字典序（不依赖 HashMap 迭代序）。
+        enabled_engines.sort_by(|a, b| {
+            a.core()
+                .priority()
+                .cmp(&b.core().priority())
+                .then_with(|| a.component_id().cmp(b.component_id()))
+        });
 
         let boosters = self.score_boosters.read();
         let enabled_boosters: Vec<Arc<dyn ScoreBooster>> = boosters
@@ -141,12 +175,90 @@ impl PluginComponentRegistry {
             .cloned()
             .collect();
 
-        enabled_engine.map(|engine| SearchPipeline::new(engine, enabled_boosters, top_k))
+        enabled_engines
+            .into_iter()
+            .next()
+            .map(|engine| SearchPipeline::new(engine, enabled_boosters, top_k))
     }
 }
 
 impl Default for PluginComponentRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use zerolaunch_plugin_api::config::{ComponentType, Configurable, SettingDefinition};
+    use zerolaunch_plugin_api::{CachedCandidateData, ScoredCandidate};
+
+    struct StubEngine {
+        core: zerolaunch_plugin_api::config::ComponentCore,
+    }
+
+    impl Configurable for StubEngine {
+        fn core(&self) -> &zerolaunch_plugin_api::config::ComponentCore {
+            &self.core
+        }
+        fn setting_schema(&self) -> Vec<SettingDefinition> {
+            vec![]
+        }
+    }
+
+    #[async_trait]
+    impl SearchEngine for StubEngine {
+        async fn calculate_scores(
+            &self,
+            _candidates: &CachedCandidateData,
+            _query: &str,
+        ) -> Vec<ScoredCandidate> {
+            vec![]
+        }
+    }
+
+    fn stub_engine(id: &str, priority: u32) -> Arc<dyn SearchEngine> {
+        Arc::new(StubEngine {
+            core: zerolaunch_plugin_api::config::ComponentCore::new(
+                id.into(),
+                id.into(),
+                String::new(),
+                ComponentType::SearchEngine,
+                priority,
+            ),
+        })
+    }
+
+    /// 多引擎启用时确定性选择：priority 小者优先，同 priority 按 component_id 字典序。
+    #[test]
+    fn test_build_search_pipeline_deterministic_selection() {
+        let cm = ConfigManager::new(std::env::temp_dir().join("zl-engine-select-test"));
+        let registry = PluginComponentRegistry::new();
+        registry.register_search_engine(stub_engine("z-engine", 20));
+        registry.register_search_engine(stub_engine("a-engine", 20));
+        registry.register_search_engine(stub_engine("b-engine", 10));
+
+        let pipeline = registry
+            .build_search_pipeline(&cm, 10)
+            .expect("存在启用的搜索引擎");
+        assert_eq!(
+            pipeline.engine().component_id(),
+            "b-engine",
+            "priority 最小者优先"
+        );
+
+        let registry2 = PluginComponentRegistry::new();
+        registry2.register_search_engine(stub_engine("z-engine", 5));
+        registry2.register_search_engine(stub_engine("a-engine", 5));
+        let pipeline2 = registry2
+            .build_search_pipeline(&cm, 10)
+            .expect("存在启用的搜索引擎");
+        assert_eq!(
+            pipeline2.engine().component_id(),
+            "a-engine",
+            "同 priority 按 component_id 字典序"
+        );
     }
 }

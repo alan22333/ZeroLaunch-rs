@@ -131,8 +131,9 @@ impl Configurable for UpperCaseLetterExtractor {
     }
 }
 
+#[async_trait]
 impl KeywordOptimizer for UpperCaseLetterExtractor {
-    fn optimize(&self, keyword: &str) -> Vec<String> {
+    async fn optimize(&self, keyword: &str) -> Vec<String> {
         self.inner.read().optimize(keyword)
     }
 

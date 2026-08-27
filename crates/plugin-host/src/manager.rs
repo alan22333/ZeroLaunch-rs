@@ -16,7 +16,7 @@ use base64::Engine;
 use zerolaunch_plugin_api::config::Configurable;
 use zerolaunch_plugin_api::plugin::{PluginKind, PluginMetadata, PluginMode};
 use zerolaunch_plugin_protocol::manifest::Manifest;
-use zerolaunch_plugin_protocol::messages::ComponentKind;
+use zerolaunch_plugin_protocol::messages::{ComponentKind, KeywordOptimizerInfo};
 use zerolaunch_plugin_protocol::ProtocolError;
 
 use crate::adapter::remote_component::{RemoteComponent, RemoteComponentKind};
@@ -788,6 +788,25 @@ fn build_components(
                         result_actions,
                     }
                 }
+                ComponentKind::SearchEngine => RemoteComponentKind::SearchEngine,
+                ComponentKind::ScoreBooster => RemoteComponentKind::ScoreBooster,
+                ComponentKind::KeywordOptimizer => {
+                    // 与 process.rs discover 兜底语义一致：RPC 失败时 uses_context=false、
+                    // priority 取组件自身优先级（不用 Default 的 priority=0）。
+                    let info = init_result
+                        .keyword_optimizer_info_map
+                        .iter()
+                        .find(|(id, _)| id == &comp.component_id)
+                        .map(|(_, v)| v.clone())
+                        .unwrap_or(KeywordOptimizerInfo {
+                            uses_context: false,
+                            priority,
+                        });
+                    RemoteComponentKind::KeywordOptimizer {
+                        info: parking_lot::RwLock::new(info),
+                    }
+                }
+                ComponentKind::KeywordInjector => RemoteComponentKind::KeywordInjector,
             };
 
             Arc::new(RemoteComponent::new(

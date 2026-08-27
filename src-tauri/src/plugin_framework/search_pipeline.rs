@@ -2,6 +2,10 @@ use std::sync::Arc;
 use zerolaunch_plugin_api::{
     CachedCandidateData, CandidateId, ScoreBooster, ScoredCandidate, SearchEngine,
 };
+
+/// 搜索管道：单一引擎打分 + 多个增强器顺序修正（与内置引擎/增强器进程内一致；
+/// 第三方组件经 RemoteComponent 走 RPC，管道对组件来源无感知）。
+#[derive(Clone)]
 pub struct SearchPipeline {
     engine: Arc<dyn SearchEngine>,
     boosters: Vec<Arc<dyn ScoreBooster>>,
@@ -24,8 +28,13 @@ impl SearchPipeline {
     /// 执行搜索并截断到 top_k。
     /// 参数：candidates - 候选项缓存；query - 已预处理的查询词。
     /// 返回：按分数降序排列、截断后的 ScoredCandidate 列表。
-    pub fn search(&self, candidates: &CachedCandidateData, query: &str) -> Vec<ScoredCandidate> {
+    pub async fn search(
+        &self,
+        candidates: &CachedCandidateData,
+        query: &str,
+    ) -> Vec<ScoredCandidate> {
         self.search_all(candidates, query)
+            .await
             .into_iter()
             .take(self.top_k)
             .collect()
@@ -34,15 +43,15 @@ impl SearchPipeline {
     /// 执行全量搜索（不截断 top_k），供调试详情等需要观察完整排序的场景使用。
     /// 参数：candidates - 候选项缓存；query - 已预处理的查询词。
     /// 返回：按分数降序排列的完整 ScoredCandidate 列表。
-    pub fn search_all(
+    pub async fn search_all(
         &self,
         candidates: &CachedCandidateData,
         query: &str,
     ) -> Vec<ScoredCandidate> {
-        let mut scored = self.engine.calculate_scores(candidates, query);
+        let mut scored = self.engine.calculate_scores(candidates, query).await;
 
         for booster in &self.boosters {
-            booster.boost(&mut scored, candidates, query);
+            booster.boost(&mut scored, candidates, query).await;
         }
 
         scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
@@ -54,11 +63,16 @@ impl SearchPipeline {
         self.top_k
     }
 
+    /// 当前管道使用的搜索引擎（诊断/测试用）。
+    pub fn engine(&self) -> &Arc<dyn SearchEngine> {
+        &self.engine
+    }
+
     /// 记录候选项被选中启动，通知所有 ScoreBooster 学习用户习惯
     /// 参数：candidate_id - 被选中的候选项 ID；data - 候选项缓存数据；query - 用户查询词
-    pub fn record(&self, candidate_id: CandidateId, data: &CachedCandidateData, query: &str) {
+    pub async fn record(&self, candidate_id: CandidateId, data: &CachedCandidateData, query: &str) {
         for booster in &self.boosters {
-            booster.record(candidate_id, data, query);
+            booster.record(candidate_id, data, query).await;
         }
     }
 }

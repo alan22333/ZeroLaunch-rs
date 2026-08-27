@@ -144,10 +144,11 @@ impl Configurable for AliasOptimizer {
     }
 }
 
+#[async_trait]
 impl KeywordInjector for AliasOptimizer {
     /// 根据候选项的目标路径注入别名关键词。
     /// 匹配方式：精确匹配 candidate.target.payload().to_ascii_lowercase() 与配置中的 target 字段。
-    fn inject_keywords(&self, candidate: &SearchCandidate) -> Vec<String> {
+    async fn inject_keywords(&self, candidate: &SearchCandidate) -> Vec<String> {
         let target = candidate.target.payload().to_ascii_lowercase();
         let settings = self.settings.read();
         settings

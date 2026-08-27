@@ -1,10 +1,11 @@
 use crate::plugin::types::{CandidateId, ExecutionTarget, SearchCandidate};
 use dashmap::DashMap;
 use dashmap::Entry;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use tracing::{debug, warn};
 
-/// 保存当前已经缓存的候选数据
+#[derive(Clone)]
 pub struct CachedCandidateData {
     /// 当前缓存的候选数据
     candidates: Vec<SearchCandidate>,
@@ -18,6 +19,22 @@ pub struct CachedCandidateData {
     cached_display_names: HashSet<String>,
     /// 下一个候选项ID
     next_candidate_id: CandidateId,
+}
+
+/// CachedCandidateData 的跨 RPC 序列化快照（宿主缓存 → 插件进程）。
+///
+/// 由 CachedCandidateData::to_data 导出、from_data 还原，仅用于搜索流水线
+/// 组件（SearchEngine / ScoreBooster）经 RPC 接收宿主候选缓存的传输；
+/// index / 去重集合不随快照传输——它们由候选列表确定性派生（id 按插入
+/// 顺序自增分配、无删除），from_data 以 debug_assert 校验后重建。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CandidateCacheSnapshot {
+    /// 候选列表（保持 id 自增分配顺序，id 与位置一一对应）。
+    #[serde(rename = "candidates")]
+    pub candidates: Vec<SearchCandidate>,
+    /// 下一个待分配的候选项 ID（导出时刻的 next_candidate_id）。
+    #[serde(rename = "nextCandidateId")]
+    pub next_candidate_id: CandidateId,
 }
 
 impl Default for CachedCandidateData {
@@ -34,6 +51,57 @@ impl CachedCandidateData {
             cached_targets: HashSet::new(),
             cached_display_names: HashSet::new(),
             next_candidate_id: 1,
+        }
+    }
+    /// 导出跨 RPC 序列化快照（与 from_data 一一对应）。
+    /// 用于搜索流水线组件（引擎/增强器）经 RPC 接收宿主候选缓存。
+    pub fn to_data(&self) -> CandidateCacheSnapshot {
+        CandidateCacheSnapshot {
+            candidates: self.candidates.clone(),
+            next_candidate_id: self.next_candidate_id,
+        }
+    }
+
+    /// 从跨 RPC 序列化快照还原缓存（保真 id 序列，与 to_data 一一对应）。
+    /// 参数：data - to_data() 导出的快照。
+    /// debug 构建校验快照不变量：id 与位置一一对应、id 唯一、目标与显示名无重复。
+    pub fn from_data(data: CandidateCacheSnapshot) -> Self {
+        let index = DashMap::new();
+        let mut cached_targets = HashSet::new();
+        let mut cached_display_names = HashSet::new();
+        for (pos, candidate) in data.candidates.iter().enumerate() {
+            debug_assert_eq!(
+                candidate.id,
+                pos as CandidateId + 1,
+                "快照候选 id 与位置不对应: id = {}, pos = {}",
+                candidate.id,
+                pos
+            );
+            index.insert(candidate.id, pos);
+            debug_assert!(
+                cached_targets.insert(candidate.target.clone()),
+                "快照候选中存在重复执行目标: {:?}",
+                candidate.target
+            );
+            debug_assert!(
+                cached_display_names.insert(candidate.name.to_lowercase()),
+                "快照候选中存在重复显示名: {}",
+                candidate.name
+            );
+        }
+        debug_assert_eq!(
+            data.next_candidate_id,
+            data.candidates.len() as CandidateId + 1,
+            "快照 next_candidate_id 与候选数量不对应: next = {}, len = {}",
+            data.next_candidate_id,
+            data.candidates.len()
+        );
+        Self {
+            candidates: data.candidates,
+            index,
+            cached_targets,
+            cached_display_names,
+            next_candidate_id: data.next_candidate_id,
         }
     }
 
@@ -109,5 +177,80 @@ impl CachedCandidateData {
     fn has_display_name(&self, display_name: &str) -> bool {
         self.cached_display_names
             .contains(&display_name.to_lowercase())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::IconRequest;
+
+    fn sample_candidate(i: u64) -> SearchCandidate {
+        SearchCandidate {
+            id: i,
+            name: format!("候选{}", i),
+            icon: IconRequest::Path(format!("C:\\item{}.exe", i)),
+            target: ExecutionTarget::Path(format!("C:\\item{}.exe", i)),
+            keywords: vec!["kw".into()],
+            bias: 0.0,
+            trigger_keywords: Vec::new(),
+        }
+    }
+
+    /// to_data → from_data 一一对应：id 序列、顺序、内容全部保真，
+    /// next_candidate_id 还原后继续自增分配。
+    #[test]
+    fn test_snapshot_roundtrip() {
+        let mut cache = CachedCandidateData::new();
+        for i in 1..=10u64 {
+            cache.add_candidate(sample_candidate(i));
+        }
+        let mut restored = CachedCandidateData::from_data(cache.to_data());
+        assert_eq!(restored.get_candidates().len(), 10);
+        for i in 1..=10u64 {
+            let c = restored.get_candidate(i).expect("id 保真");
+            assert_eq!(c.name, format!("候选{}", i));
+            assert_eq!(
+                c.target,
+                ExecutionTarget::Path(format!("C:\\item{}.exe", i))
+            );
+        }
+        // next_candidate_id 还原为 11：新候选 id 从 11 继续
+        restored.add_candidate(sample_candidate(0));
+        assert_eq!(restored.get_candidates().len(), 11);
+        assert_eq!(
+            restored.get_candidate(11).expect("next_id 保真").name,
+            "候选0"
+        );
+    }
+
+    /// 快照经 JSON 序列化后往返，保真性不变（跨 RPC 实际传输路径）。
+    #[test]
+    fn test_snapshot_json_roundtrip() {
+        let mut cache = CachedCandidateData::new();
+        for i in 1..=5u64 {
+            cache.add_candidate(sample_candidate(i));
+        }
+        let json = serde_json::to_value(cache.to_data()).unwrap();
+        let data: CandidateCacheSnapshot = serde_json::from_value(json).unwrap();
+        let restored = CachedCandidateData::from_data(data);
+        assert_eq!(restored.get_candidates().len(), 5);
+        for i in 1..=5u64 {
+            assert_eq!(
+                restored.get_candidate(i).expect("id 保真").name,
+                format!("候选{}", i)
+            );
+        }
+    }
+
+    /// id 与位置不对应的快照在 debug 构建下立即暴露（release 不校验）。
+    #[test]
+    #[should_panic(expected = "id 与位置不对应")]
+    fn test_from_data_detects_mismatched_id() {
+        let data = CandidateCacheSnapshot {
+            candidates: vec![sample_candidate(5)],
+            next_candidate_id: 2,
+        };
+        CachedCandidateData::from_data(data);
     }
 }

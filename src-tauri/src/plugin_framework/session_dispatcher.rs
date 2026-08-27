@@ -23,7 +23,7 @@ use zerolaunch_plugin_api::services::ParameterSnapshot;
 use zerolaunch_plugin_api::{
     CachedCandidateData, CandidateId, ExecutionContext, ExecutionError, ExecutionTarget, ListItem,
     Plugin, PluginContext, PluginKind, PluginMode, Query, QueryChannel, QueryResponse,
-    QueryRevisionGate, SearchCandidate,
+    QueryRevisionGate, ScoredCandidate, SearchCandidate,
 };
 
 use super::candidate_pipeline::CandidatePipeline;
@@ -209,7 +209,7 @@ pub struct SessionDispatcher {
     // ---- 横切：默认搜索服务（Dispatcher 直接持有，管道重建对查询无感）----
     search_pipeline: Arc<RwLock<Option<SearchPipeline>>>,
     candidate_pipeline: Arc<tokio::sync::RwLock<CandidatePipeline>>,
-    cached_candidates: Arc<RwLock<CachedCandidateData>>,
+    cached_candidates: Arc<RwLock<Arc<CachedCandidateData>>>,
     executor_registry: Arc<RwLock<ExecutorRegistry>>,
     config_manager: Arc<RwLock<Option<Arc<ConfigManager>>>>,
     host_api: RwLock<Option<Arc<HostApi>>>,
@@ -251,7 +251,7 @@ impl SessionDispatcher {
             }),
             search_pipeline: Arc::new(RwLock::new(None)),
             candidate_pipeline: Arc::new(tokio::sync::RwLock::new(CandidatePipeline::new())),
-            cached_candidates: Arc::new(RwLock::new(CachedCandidateData::new())),
+            cached_candidates: Arc::new(RwLock::new(Arc::new(CachedCandidateData::new()))),
             executor_registry: Arc::new(RwLock::new(ExecutorRegistry::new())),
             config_manager: Arc::new(RwLock::new(None)),
             host_api: RwLock::new(None),
@@ -426,7 +426,7 @@ impl SessionDispatcher {
 
     /// 设置缓存的候选项。
     pub fn set_cached_candidates(&self, candidates: CachedCandidateData) {
-        *self.cached_candidates.write() = candidates;
+        *self.cached_candidates.write() = Arc::new(candidates);
     }
 
     /// 设置配置管理器。
@@ -528,7 +528,7 @@ impl SessionDispatcher {
         let pipeline = self.candidate_pipeline.read().await;
         let candidates = pipeline.collect().await;
         let candidates = self.merge_plugin_candidates(candidates);
-        *self.cached_candidates.write() = candidates;
+        *self.cached_candidates.write() = Arc::new(candidates);
         *self.last_refresh.lock() = Some(Instant::now());
     }
 
@@ -558,27 +558,26 @@ impl SessionDispatcher {
     /// 调试用：对缓存候选项运行搜索并返回评分结果（已排序 top_k）。
     /// 参数：query - 原始查询文本（内部转为小写并折叠连续空格后匹配）。
     /// 返回：评分排序后的候选项列表；搜索管道未初始化时为空。
-    pub fn debug_search(&self, query: &str) -> Vec<zerolaunch_plugin_api::ScoredCandidate> {
-        let cached = self.cached_candidates.read();
-        let pipeline_guard = self.search_pipeline.read();
-        let Some(pipeline) = pipeline_guard.as_ref() else {
+    pub async fn debug_search(&self, query: &str) -> Vec<ScoredCandidate> {
+        // 快照后释放锁再执行（远端组件经 RPC 可能耗时，不跨 await 持锁）
+        let cached = self.cached_candidates.read().clone();
+        let Some(pipeline) = self.search_pipeline.read().clone() else {
             return Vec::new();
         };
         let normalized = collapse_repeated_spaces(&query.to_lowercase());
-        pipeline.search(&cached, &normalized)
+        pipeline.search(&cached, &normalized).await
     }
 
     /// 调试用：对缓存候选项运行全量搜索（不截断 top_k），供分数分解观察。
     /// 参数：query - 原始查询文本（内部转为小写并折叠连续空格后匹配）。
     /// 返回：完整评分排序后的候选项列表；搜索管道未初始化时为空。
-    pub fn debug_search_all(&self, query: &str) -> Vec<zerolaunch_plugin_api::ScoredCandidate> {
-        let cached = self.cached_candidates.read();
-        let pipeline_guard = self.search_pipeline.read();
-        let Some(pipeline) = pipeline_guard.as_ref() else {
+    pub async fn debug_search_all(&self, query: &str) -> Vec<ScoredCandidate> {
+        let cached = self.cached_candidates.read().clone();
+        let Some(pipeline) = self.search_pipeline.read().clone() else {
             return Vec::new();
         };
         let normalized = collapse_repeated_spaces(&query.to_lowercase());
-        pipeline.search_all(&cached, &normalized)
+        pipeline.search_all(&cached, &normalized).await
     }
 
     /// 调试用：对给定名称生成关键字列表（采集管道 DataSource 能力）。
@@ -587,6 +586,7 @@ impl SessionDispatcher {
             .read()
             .await
             .generate_keywords_for_name(name)
+            .await
     }
 
     /// 调试用：运行索引采集并返回（耗时ms, 候选总数）。
@@ -783,9 +783,9 @@ impl SessionDispatcher {
             }
         } else {
             // 默认搜索：搜索管道 + 行内参数检测 + ListItem 映射。
-            let cached = self.cached_candidates.read();
-            let pipeline_guard = self.search_pipeline.read();
-            let Some(pipeline) = pipeline_guard.as_ref() else {
+            // 快照后释放锁再执行（远端引擎/增强器经 RPC 可能耗时，不跨 await 持锁）
+            let cached = self.cached_candidates.read().clone();
+            let Some(pipeline) = self.search_pipeline.read().clone() else {
                 warn!("SearchPipeline 未初始化，返回空结果");
                 return Ok(RoutedQuery {
                     response: QueryResponse::Empty,
@@ -794,7 +794,7 @@ impl SessionDispatcher {
                 });
             };
             let normalized = collapse_repeated_spaces(&query.search_term);
-            let scored_candidates = pipeline.search(&cached, &normalized);
+            let scored_candidates = pipeline.search(&cached, &normalized).await;
 
             // 提交门控（与插件分支一致）：搜索计算期间若有同通道更新的查询进入后端，
             // 本查询已过期，丢弃结果——过期返回空结果优于返回过期数据（CLI 并发/排队
@@ -1087,7 +1087,8 @@ impl SessionDispatcher {
         query_text: &str,
         user_args: &[String],
     ) -> Result<(), ConfirmError> {
-        let exec_ctx = {
+        // 候选快照后释放锁（record 对远端增强器经 RPC，不跨 await 持锁）
+        let (exec_ctx, candidate_snapshot) = {
             let cached = self.cached_candidates.read();
             let candidate = cached
                 .get_candidate(candidate_id)
@@ -1100,11 +1101,22 @@ impl SessionDispatcher {
                 parameter_snapshot: snapshot,
                 locale: self.current_locale(),
             };
-            if let Some(pipeline) = self.search_pipeline.read().as_ref() {
-                pipeline.record(candidate_id, &cached, query_text);
-            }
-            exec_ctx
+            (exec_ctx, cached.clone())
         };
+        // 记录搜索行为：通知式 fire-and-forget（远端增强器 record RPC 超时 2s×N，
+        // 不阻塞执行器解析与执行；失败仅告警，见 RemoteComponent::record）。
+        let pipeline = {
+            let guard = self.search_pipeline.read();
+            guard.clone()
+        };
+        if let Some(pipeline) = pipeline {
+            let query_text = query_text.to_string();
+            tauri::async_runtime::spawn(async move {
+                pipeline
+                    .record(candidate_id, candidate_snapshot.as_ref(), &query_text)
+                    .await;
+            });
+        }
         // 锁在 await 前已全部释放；插件候选（ExecutionTarget::Plugin）由宿主内置
         // PluginWakeExecutor 处理，统一经本管道。
         let executor = {
@@ -1505,6 +1517,30 @@ impl SessionDispatcher {
         }
     }
 
+    /// 引擎互斥不变量：仅允许一个启用的搜索引擎。保持 keep_id 启用，禁用其他启用的引擎
+    /// （经 set_enabled 持久化并发布事件，各入口统一生效；disable 事件不会再走互斥，无递归）。
+    fn enforce_single_search_engine(&self, keep_id: &str) {
+        let Some(cm) = self.config_manager() else {
+            return;
+        };
+        let others: Vec<String> = self
+            .components
+            .search_engine_ids()
+            .into_iter()
+            .filter(|id| id != keep_id && cm.is_enabled(id))
+            .collect();
+        if !others.is_empty() {
+            warn!(
+                "SearchEngine 互斥：启用 {} 时自动禁用 {}",
+                keep_id,
+                others.join(", ")
+            );
+            for id in others {
+                let _ = cm.set_enabled(&id, false);
+            }
+        }
+    }
+
     /// 处理配置变更事件。
     pub async fn handle_config_event(&self, event: &ConfigEvent) {
         match event {
@@ -1553,8 +1589,17 @@ impl SessionDispatcher {
                         info!("组件或偏置规则启用状态变更，重建候选管道");
                         self.rebuild_candidate_pipeline().await;
                     }
-                    ComponentType::SearchEngine | ComponentType::ScoreBooster => {
-                        info!("搜索引擎/分数增强器启用状态变更，重建搜索管道");
+                    ComponentType::SearchEngine => {
+                        if *enabled {
+                            // 引擎互斥（后端权威不变量）：启用新引擎时自动禁用其他启用的引擎，
+                            // 任意入口（UI toggle / CLI / 配置导入）启用都经事件统一生效。
+                            self.enforce_single_search_engine(component_id);
+                        }
+                        info!("搜索引擎启用状态变更，重建搜索管道");
+                        self.rebuild_search_pipeline();
+                    }
+                    ComponentType::ScoreBooster => {
+                        info!("分数增强器启用状态变更，重建搜索管道");
                         self.rebuild_search_pipeline();
                     }
                     ComponentType::Plugin => {
@@ -1580,6 +1625,18 @@ impl SessionDispatcher {
                     }
                     if let Some(ex) = comp.clone().as_action_executor() {
                         self.register_executor(ex);
+                    }
+                    if let Some(engine) = comp.clone().as_search_engine() {
+                        self.components.register_search_engine(engine);
+                    }
+                    if let Some(booster) = comp.clone().as_score_booster() {
+                        self.components.register_score_booster(booster);
+                    }
+                    if let Some(optimizer) = comp.clone().as_keyword_optimizer() {
+                        self.components.register_keyword_optimizer(optimizer);
+                    }
+                    if let Some(injector) = comp.clone().as_keyword_injector() {
+                        self.components.register_keyword_injector(injector);
                     }
                     if let Some(p) = comp.clone().as_plugin() {
                         // 按组件持久化启用状态决定是否建立触发词路由（禁用插件重启后不路由）
@@ -1609,6 +1666,8 @@ impl SessionDispatcher {
                 }
                 // 重建候选管道以包含新组件
                 self.rebuild_candidate_pipeline().await;
+                // 重建搜索管道以包含新引擎/增强器
+                self.rebuild_search_pipeline();
             }
             ConfigEvent::PluginUnregistered(adapters) => {
                 info!("第三方插件运行时组件已解注册: {}", adapters.plugin_id);
@@ -1621,9 +1680,27 @@ impl SessionDispatcher {
                     if comp.is_action_executor() {
                         self.unregister_executor(comp.core.component_id());
                     }
+                    if comp.is_search_engine() {
+                        self.components
+                            .unregister_search_engine(comp.core.component_id());
+                    }
+                    if comp.is_score_booster() {
+                        self.components
+                            .unregister_score_booster(comp.core.component_id());
+                    }
+                    if comp.is_keyword_optimizer() {
+                        self.components
+                            .unregister_keyword_optimizer(comp.core.component_id());
+                    }
+                    if comp.is_keyword_injector() {
+                        self.components
+                            .unregister_keyword_injector(comp.core.component_id());
+                    }
                 }
                 // 重建候选管道以移除已解注册的组件
                 self.rebuild_candidate_pipeline().await;
+                // 重建搜索管道以移除已解注册的引擎/增强器
+                self.rebuild_search_pipeline();
             }
         }
     }

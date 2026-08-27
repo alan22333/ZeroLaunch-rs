@@ -73,7 +73,7 @@ pub async fn debug_test_search_time(
 
     let session_dispatcher = state.get_session_dispatcher();
     let start = std::time::Instant::now();
-    let scored = session_dispatcher.debug_search(&query);
+    let scored = session_dispatcher.debug_search(&query).await;
     let duration_ms = start.elapsed().as_millis() as u64;
 
     Ok(SearchTimingResult {
@@ -146,7 +146,7 @@ pub async fn debug_search_detail(
 
     let session_dispatcher = state.get_session_dispatcher();
     // 全量评分（不截断 top_k），复现旧版调试页"观察所有候选分数分解"的能力
-    let scored = session_dispatcher.debug_search_all(&query);
+    let scored = session_dispatcher.debug_search_all(&query).await;
 
     let items: Vec<SearchDetailItem> = scored
         .into_iter()

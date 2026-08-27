@@ -55,6 +55,7 @@ impl Configurable for SkimSearchModel {
     }
 }
 
+#[async_trait]
 impl SearchEngine for SkimSearchModel {
     /// 批量计算候选项与查询的匹配分数
     ///
@@ -64,7 +65,7 @@ impl SearchEngine for SkimSearchModel {
     ///
     /// # Returns
     /// * 按原始数据排列的 `ScoredCandidate` 列表
-    fn calculate_scores(
+    async fn calculate_scores(
         &self,
         candidates: &CachedCandidateData,
         query: &str,

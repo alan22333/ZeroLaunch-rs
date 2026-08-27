@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use zerolaunch_plugin_api::config::ComponentType;
-use zerolaunch_plugin_api::{ExecutionContext, PluginContext, Query, SearchCandidate, TargetType};
+use zerolaunch_plugin_api::{
+    CandidateCacheSnapshot, CandidateId, ExecutionContext, PluginContext, Query, ScoredCandidate,
+    SearchCandidate, TargetType,
+};
 
 // ─── plugin/initialize ───────────────────────────────────────────
 
@@ -51,11 +54,9 @@ fn default_component_priority() -> u32 {
     50
 }
 
-/// 第三方插件可声明的组件种类。
-///
-/// 第一版只开放 Plugin / DataSource / ActionExecutor。
-/// TODO: 后续版本开放 KeywordOptimizer / SearchEngine / ScoreBooster，
-/// 届时在此枚举中新增对应 variant，并同步更新 REQUIRED_PROVIDES_VALUES。
+/// 与内置插件完全对等：Plugin / DataSource / ActionExecutor / SearchEngine /
+/// ScoreBooster / KeywordOptimizer / KeywordInjector 均可由第三方插件提供，
+/// 宿主按 kind 注册进对应管道（触发词路由 / 候选采集 / 执行器 / 搜索管道 / 候选管道）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ComponentKind {
@@ -71,6 +72,19 @@ pub enum ComponentKind {
         #[serde(rename = "targetTypes")]
         target_types: Vec<TargetType>,
     },
+    /// 搜索引擎 —— 参与搜索管道（与内置引擎互斥，仅允许一个启用）。
+    #[serde(rename = "search_engine")]
+    SearchEngine,
+    /// 分数增强器 —— 在引擎打分后追加分数修正（多个可同时启用）。
+    #[serde(rename = "score_booster")]
+    ScoreBooster,
+    /// 关键词优化器 —— 在候选管道中扩展搜索关键词。
+    /// uses_context / priority 为设置可变属性，经 keyword_optimizer_info RPC 拉取。
+    #[serde(rename = "keyword_optimizer")]
+    KeywordOptimizer,
+    /// 关键词注入器 —— 基于候选项完整上下文注入额外关键词。
+    #[serde(rename = "keyword_injector")]
+    KeywordInjector,
 }
 
 // ─── plugin/get_settings_schema ──────────────────────────────────
@@ -216,6 +230,125 @@ pub struct ExecutorExecuteParams {
 pub struct ExecutorExecuteResult {
     #[serde(default)]
     pub error: Option<String>,
+}
+
+// ─── plugin/calculate_scores ─────────────────────────────────────
+//
+// SearchEngine 组件：对缓存候选计算分数（含全量候选与查询词，宿主按
+// ScoredCandidate 列表重建结果）。
+
+/// plugin/calculate_scores 请求参数。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CalculateScoresParams {
+    /// 目标组件 id（SearchEngine 组件）。
+    #[serde(rename = "componentId")]
+    pub component_id: String,
+    /// 全量候选快照（宿主 CachedCandidateData::to_data 导出，id 保真）。
+    #[serde(rename = "candidates")]
+    pub candidates: CandidateCacheSnapshot,
+    /// 用户查询词。
+    #[serde(rename = "query")]
+    pub query: String,
+}
+
+// ─── plugin/booster_boost ────────────────────────────────────────
+//
+// ScoreBooster 组件：对已计算分数做增强，返回增强后的分数列表（索引与传入一致）。
+
+/// plugin/booster_boost 请求参数。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BoosterBoostParams {
+    /// 目标组件 id（ScoreBooster 组件）。
+    #[serde(rename = "componentId")]
+    pub component_id: String,
+    /// 全量候选快照（宿主 CachedCandidateData::to_data 导出，id 保真）。
+    #[serde(rename = "candidates")]
+    pub candidates: CandidateCacheSnapshot,
+    /// 引擎计算出的当前分数列表。
+    #[serde(rename = "scored")]
+    pub scored: Vec<ScoredCandidate>,
+    /// 用户查询词。
+    #[serde(rename = "query")]
+    pub query: String,
+}
+
+// ─── plugin/booster_record ───────────────────────────────────────
+//
+// ScoreBooster 组件：记录用户确认（选中候选 → 学习用户习惯）。
+
+/// plugin/booster_record 请求参数。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BoosterRecordParams {
+    /// 目标组件 id（ScoreBooster 组件）。
+    #[serde(rename = "componentId")]
+    pub component_id: String,
+    /// 被选中候选项的 id（宿主侧缓存内的原始 id）。
+    #[serde(rename = "candidateId")]
+    pub candidate_id: CandidateId,
+    /// 全量候选快照（宿主 CachedCandidateData::to_data 导出，id 保真）。
+    #[serde(rename = "candidates")]
+    pub candidates: CandidateCacheSnapshot,
+    /// 用户查询词。
+    #[serde(rename = "query")]
+    pub query: String,
+}
+
+// ─── plugin/keyword_optimizer_info ───────────────────────────────
+//
+// KeywordOptimizer 组件的动态属性（priority / uses_context 为设置可变字段，
+// 宿主在发现与设置变更时经本方法拉取并缓存）。
+//
+// 响应为裸 `KeywordOptimizerInfo`。
+
+/// KeywordOptimizer 组件的优化属性（经 keyword_optimizer_info RPC 拉取）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeywordOptimizerInfo {
+    /// 是否对所有已累积的关键词进行优化（true），还是只对原始名称优化。
+    #[serde(rename = "usesContext")]
+    pub uses_context: bool,
+    /// 链式执行优先级，小者先执行。
+    #[serde(rename = "priority")]
+    pub priority: u32,
+}
+
+/// plugin/keyword_optimizer_info 请求参数。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeywordOptimizerInfoParams {
+    /// 目标组件 id（KeywordOptimizer 组件）。
+    #[serde(rename = "componentId")]
+    pub component_id: String,
+}
+
+// ─── plugin/keyword_optimize ─────────────────────────────────────
+//
+// KeywordOptimizer 组件：优化单个关键词（宿主按链序逐级调用）。
+//
+// 响应为裸 `Vec<String>`（优化生成的新关键词）。
+
+/// plugin/keyword_optimize 请求参数。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeywordOptimizeParams {
+    /// 目标组件 id（KeywordOptimizer 组件）。
+    #[serde(rename = "componentId")]
+    pub component_id: String,
+    /// 待优化的关键词。
+    #[serde(rename = "keyword")]
+    pub keyword: String,
+}
+
+// KeywordInjector 组件：对单个候选注入关键词（与内置逐候选语义一致）。
+//
+// 响应为裸 `Vec<String>`。
+
+/// plugin/keyword_inject 请求参数。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeywordInjectParams {
+    /// 目标组件 id（KeywordInjector 组件）。
+    #[serde(rename = "componentId")]
+    pub component_id: String,
+    /// 待注入的候选项（完整上下文：target、keywords 等）。
+    #[serde(rename = "candidate")]
+    pub candidate: SearchCandidate,
 }
 
 // ─── plugin/init ─────────────────────────────────────────────────

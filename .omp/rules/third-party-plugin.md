@@ -76,6 +76,6 @@ scope: "tool:read(crates/plugin-protocol/**), tool:edit(crates/plugin-protocol/*
 
 ## 第三方插件开发约束
 
-- 插件可声明实现 Plugin / DataSource / ActionExecutor（第一版不开放 KeywordOptimizer / SearchEngine / ScoreBooster）
+- 插件可声明实现 Plugin / DataSource / ActionExecutor / SearchEngine / ScoreBooster / KeywordOptimizer / KeywordInjector（搜索流水线组件与内置完全对等）
 - Rust 插件推荐使用 `zerolaunch-plugin-sdk-rust`
 - 全权限模式（无权限模型），但 resource 操作强制 plugin_id 命名空间隔离

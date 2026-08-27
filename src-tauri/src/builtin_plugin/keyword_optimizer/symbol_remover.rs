@@ -117,8 +117,9 @@ impl Configurable for SymbolRemover {
     }
 }
 
+#[async_trait]
 impl KeywordOptimizer for SymbolRemover {
-    fn optimize(&self, keyword: &str) -> Vec<String> {
+    async fn optimize(&self, keyword: &str) -> Vec<String> {
         self.inner.read().optimize(keyword)
     }
 

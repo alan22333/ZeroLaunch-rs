@@ -235,9 +235,10 @@ pub trait DataSource: Configurable {
 }
 
 // 表示对搜索的候选项的搜索关键字做优化的组件，通常是对搜索关键字进行扩展或者优化，以提高搜索的召回率
+#[async_trait]
 pub trait KeywordOptimizer: Configurable {
     // 根据关键词优化出一组新关键词，通常是对关键词进行分词、扩展或转换
-    fn optimize(&self, keyword: &str) -> Vec<String>;
+    async fn optimize(&self, keyword: &str) -> Vec<String>;
     // 是否对所有已累积的关键词进行优化（true），还是只对原始名称优化
     fn uses_context(&self) -> bool {
         false
@@ -246,20 +247,20 @@ pub trait KeywordOptimizer: Configurable {
     fn get_priority(&self) -> u32;
 }
 
-/// 根据候选项的完整上下文注入额外关键字。
-/// 与 KeywordOptimizer 不同，此方法可以访问候选项的 target、icon 等完整信息，
-/// 用于实现"基于候选身份的关键字注入"（如别名）。
+#[async_trait]
 pub trait KeywordInjector: Configurable {
     /// 根据候选项的完整上下文注入额外关键字。
-    /// 返回注入的关键字列表。
-    fn inject_keywords(&self, candidate: &SearchCandidate) -> Vec<String>;
+    /// 与 KeywordOptimizer 不同，此方法可以访问候选项的 target、icon 等完整信息，
+    /// 用于实现"基于候选身份的关键字注入"（如别名）。
+    async fn inject_keywords(&self, candidate: &SearchCandidate) -> Vec<String>;
 }
 
 // 表示一个搜索引擎，用于计算搜索候选项的分数
 // 用于根据搜索候选项的分数进行排序
 // 搜索引擎通常计算的是一个候选项与用户输入之间的关系
+#[async_trait]
 pub trait SearchEngine: Configurable {
-    fn calculate_scores(
+    async fn calculate_scores(
         &self,
         candidates: &CachedCandidateData,
         query: &str,
@@ -269,11 +270,17 @@ pub trait SearchEngine: Configurable {
 // 表示一个分数优化器，用于对搜索候选项的分数进行优化
 // 用于根据搜索候选项的分数进行排序
 // 分数优化器则是计算的是 *所有* 候选项与用户输入之间的关系
+#[async_trait]
 pub trait ScoreBooster: Configurable {
     // 记录用户输入了这个查询时，选择的是这个候选项
-    fn record(&self, candidate_id: CandidateId, data: &CachedCandidateData, query: &str);
+    async fn record(&self, candidate_id: CandidateId, data: &CachedCandidateData, query: &str);
     // 根据用户历史输入的查询与选择的候选项，优化当前查询所得到的所有候选项的分数
-    fn boost(&self, candidates: &mut Vec<ScoredCandidate>, data: &CachedCandidateData, query: &str);
+    async fn boost(
+        &self,
+        candidates: &mut Vec<ScoredCandidate>,
+        data: &CachedCandidateData,
+        query: &str,
+    );
 }
 
 /// 动作执行器 trait

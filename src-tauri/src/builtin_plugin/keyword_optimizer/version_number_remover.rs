@@ -162,8 +162,9 @@ impl Configurable for VersionNumberRemover {
     }
 }
 
+#[async_trait]
 impl KeywordOptimizer for VersionNumberRemover {
-    fn optimize(&self, keyword: &str) -> Vec<String> {
+    async fn optimize(&self, keyword: &str) -> Vec<String> {
         self.inner.read().optimize(keyword)
     }
 

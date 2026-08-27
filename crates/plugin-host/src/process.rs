@@ -46,6 +46,10 @@ pub struct InitResult {
     /// 策略为插件级语义（仅 Plugin 组件有），只对 Plugin 种类拉取；
     /// 查询/设置变更期间由 RemoteComponent 刷新（策略可随设置动态变化）。
     pub interaction_policy_map: Vec<(String, PanelInteraction)>,
+    /// KeywordOptimizer 组件的优化属性（plugin/keyword_optimizer_info），按
+    /// component_id 索引。uses_context / priority 为设置可变字段，只对
+    /// KeywordOptimizer 种类拉取；设置变更期间由 RemoteComponent 刷新。
+    pub keyword_optimizer_info_map: Vec<(String, KeywordOptimizerInfo)>,
 }
 
 /// Manages a single plugin subprocess instance.
@@ -279,6 +283,7 @@ impl PluginProcess {
             Vec::new();
         let mut default_enabled_map = Vec::new();
         let mut interaction_policy_map = Vec::new();
+        let mut keyword_optimizer_info_map = Vec::new();
 
         for comp in &components {
             let schema: Vec<zerolaunch_plugin_api::config::SettingDefinition> = self
@@ -348,6 +353,25 @@ impl PluginProcess {
                     .unwrap_or_default();
                 interaction_policy_map.push((comp.component_id.clone(), policy));
             }
+            // KeywordOptimizer 优化属性（uses_context / priority 为设置可变字段，
+            // 仅对 KeywordOptimizer 种类拉取一次并在设置变更期间由 RemoteComponent 刷新）。
+            if matches!(comp.kind, ComponentKind::KeywordOptimizer) {
+                let info: KeywordOptimizerInfo = self
+                    .client
+                    .call(
+                        plugin_methods::KEYWORD_OPTIMIZER_INFO,
+                        KeywordOptimizerInfoParams {
+                            component_id: comp.component_id.clone(),
+                        },
+                        Duration::from_secs(5),
+                    )
+                    .await
+                    .unwrap_or(KeywordOptimizerInfo {
+                        uses_context: false,
+                        priority: comp.priority,
+                    });
+                keyword_optimizer_info_map.push((comp.component_id.clone(), info));
+            }
 
             // 对 ActionExecutor 组件，遍历每种支持的 target_type 拉取
             // supported_actions，按 (id, label) 去重后合并。
@@ -398,6 +422,7 @@ impl PluginProcess {
             executor_actions_map,
             default_enabled_map,
             interaction_policy_map,
+            keyword_optimizer_info_map,
         })
     }
 

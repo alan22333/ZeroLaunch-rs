@@ -107,3 +107,48 @@ fn test_component_descriptor_roundtrip() {
     assert_eq!(round.component_id, "com.example.test");
     assert_eq!(round.priority, 100);
 }
+/// 固定全部组件种类变体的序列化键名（跨 RPC 契约，发布后永不改名）。
+#[test]
+fn test_component_kind_stable_serde_keys() {
+    for (kind, expected_type) in [
+        (ComponentKind::DataSource, "data_source"),
+        (ComponentKind::SearchEngine, "search_engine"),
+        (ComponentKind::ScoreBooster, "score_booster"),
+        (ComponentKind::KeywordOptimizer, "keyword_optimizer"),
+        (ComponentKind::KeywordInjector, "keyword_injector"),
+        (
+            ComponentKind::Plugin {
+                trigger_keywords: vec![],
+            },
+            "plugin",
+        ),
+        (
+            ComponentKind::ActionExecutor {
+                target_types: vec![],
+            },
+            "action_executor",
+        ),
+    ] {
+        let json = serde_json::to_value(&kind).unwrap();
+        assert_eq!(
+            json["type"], expected_type,
+            "kind 序列化键名漂移: {:?}",
+            kind
+        );
+    }
+}
+
+/// KeywordOptimizer 信息跨 RPC 往返（uses_context / priority 为设置可变字段）。
+#[test]
+fn test_keyword_optimizer_info_roundtrip() {
+    let info = KeywordOptimizerInfo {
+        uses_context: true,
+        priority: 60,
+    };
+    let json = serde_json::to_value(&info).unwrap();
+    assert_eq!(json["usesContext"], true);
+    assert_eq!(json["priority"], 60);
+    let round: KeywordOptimizerInfo = serde_json::from_value(json).unwrap();
+    assert!(round.uses_context);
+    assert_eq!(round.priority, 60);
+}

@@ -2,7 +2,7 @@ pub mod cached_candidate;
 pub mod plugin_trait;
 pub mod types;
 
-pub use cached_candidate::CachedCandidateData;
+pub use cached_candidate::{CachedCandidateData, CandidateCacheSnapshot};
 pub use plugin_trait::Plugin;
 pub use types::{
     ActionExecutor, CandidateId, DataSource, ExecutionContext, ExecutionError, ExecutionTarget,

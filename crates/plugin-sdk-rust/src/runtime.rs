@@ -17,7 +17,10 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 
 use zerolaunch_plugin_api::config::Configurable;
-use zerolaunch_plugin_api::{ActionExecutor, DataSource, Plugin};
+use zerolaunch_plugin_api::{
+    ActionExecutor, CachedCandidateData, DataSource, KeywordInjector, KeywordOptimizer, Plugin,
+    ScoreBooster, SearchEngine,
+};
 use zerolaunch_plugin_protocol::codec::{encode_frame, MAX_FRAME_SIZE, MAX_HEADER_SIZE};
 use zerolaunch_plugin_protocol::jsonrpc::{Message, Request, Response};
 use zerolaunch_plugin_protocol::messages::*;
@@ -46,16 +49,26 @@ struct IncomingRequest {
     params: serde_json::Value,
 }
 
-/// SDK 组件集合：一个 Plugin 主组件 + 任意个 DataSource / ActionExecutor 附加组件。
+/// SDK 组件集合：一个 Plugin 主组件 + 任意个 DataSource / ActionExecutor /
+/// SearchEngine / ScoreBooster / KeywordOptimizer / KeywordInjector 附加组件。
 ///
 /// 与内置插件完全对等：每个组件都是独立的 Configurable（各自的 component_id、
 /// schema、设置），进程向宿主声明全部组件（GET_COMPONENTS 返回全部）。
 pub struct PluginApp {
+    /// 插件主组件：进程级元数据、触发词、面板查询。
     pub(crate) plugin: Arc<dyn Plugin>,
     pub(crate) data_sources: Vec<Arc<dyn DataSource>>,
     pub(crate) executors: Vec<Arc<dyn ActionExecutor>>,
-    /// component_id → 组件统一索引（Plugin / DataSource / ActionExecutor 皆入）。
-    /// dispatch 按 component_id 以 O(1) 路由 Configurable / DataSource / Executor 方法。
+    /// 搜索引擎组件（与内置引擎互斥，仅允许一个启用）。
+    pub(crate) search_engines: Vec<Arc<dyn SearchEngine>>,
+    /// 分数增强器组件（引擎打分后追加修正）。
+    pub(crate) score_boosters: Vec<Arc<dyn ScoreBooster>>,
+    /// 关键词优化器组件（扩展候选关键词）。
+    pub(crate) keyword_optimizers: Vec<Arc<dyn KeywordOptimizer>>,
+    /// 关键词注入器组件（基于候选上下文注入关键词）。
+    pub(crate) keyword_injectors: Vec<Arc<dyn KeywordInjector>>,
+    /// component_id → 组件统一索引（全部组件类别皆入）。
+    /// dispatch 按 component_id 以 O(1) 路由组件方法。
     by_id: HashMap<String, ComponentEntry>,
 }
 
@@ -64,6 +77,14 @@ enum ComponentEntry {
     Plugin(Arc<dyn Plugin>),
     DataSource(Arc<dyn DataSource>),
     Executor(Arc<dyn ActionExecutor>),
+    /// 搜索引擎组件（与内置引擎互斥，仅允许一个启用）。
+    SearchEngine(Arc<dyn SearchEngine>),
+    /// 分数增强器组件。
+    ScoreBooster(Arc<dyn ScoreBooster>),
+    /// 关键词优化器组件。
+    KeywordOptimizer(Arc<dyn KeywordOptimizer>),
+    /// 关键词注入器组件。
+    KeywordInjector(Arc<dyn KeywordInjector>),
 }
 
 impl PluginApp {
@@ -79,6 +100,10 @@ impl PluginApp {
             plugin,
             data_sources: Vec::new(),
             executors: Vec::new(),
+            search_engines: Vec::new(),
+            score_boosters: Vec::new(),
+            keyword_optimizers: Vec::new(),
+            keyword_injectors: Vec::new(),
             by_id,
         }
     }
@@ -112,6 +137,75 @@ impl PluginApp {
             ex.component_id()
         );
         self.executors.push(ex);
+        self
+    }
+    /// 附加 SearchEngine 组件（搜索打分；与内置搜索引擎完全对等）。
+    /// 组件 id 重复属于插件编码错误，直接 panic 暴露。
+    pub fn with_search_engine(mut self, engine: impl SearchEngine + 'static) -> Self {
+        let engine = Arc::new(engine);
+        let component_id = engine.component_id().to_string();
+        assert!(
+            self.by_id
+                .insert(component_id, ComponentEntry::SearchEngine(engine.clone()))
+                .is_none(),
+            "SearchEngine 组件 id 重复：{}",
+            engine.component_id()
+        );
+        self.search_engines.push(engine);
+        self
+    }
+
+    /// 附加 ScoreBooster 组件（分数增强；与内置分数增强器完全对等）。
+    /// 组件 id 重复属于插件编码错误，直接 panic 暴露。
+    pub fn with_score_booster(mut self, booster: impl ScoreBooster + 'static) -> Self {
+        let booster = Arc::new(booster);
+        let component_id = booster.component_id().to_string();
+        assert!(
+            self.by_id
+                .insert(component_id, ComponentEntry::ScoreBooster(booster.clone()))
+                .is_none(),
+            "ScoreBooster 组件 id 重复：{}",
+            booster.component_id()
+        );
+        self.score_boosters.push(booster);
+        self
+    }
+
+    /// 附加 KeywordOptimizer 组件（关键词扩展；与内置优化器完全对等）。
+    /// 组件 id 重复属于插件编码错误，直接 panic 暴露。
+    pub fn with_keyword_optimizer(mut self, optimizer: impl KeywordOptimizer + 'static) -> Self {
+        let optimizer = Arc::new(optimizer);
+        let component_id = optimizer.component_id().to_string();
+        assert!(
+            self.by_id
+                .insert(
+                    component_id,
+                    ComponentEntry::KeywordOptimizer(optimizer.clone()),
+                )
+                .is_none(),
+            "KeywordOptimizer 组件 id 重复：{}",
+            optimizer.component_id()
+        );
+        self.keyword_optimizers.push(optimizer);
+        self
+    }
+
+    /// 附加 KeywordInjector 组件（基于候选上下文注入关键词；与内置注入器完全对等）。
+    /// 组件 id 重复属于插件编码错误，直接 panic 暴露。
+    pub fn with_keyword_injector(mut self, injector: impl KeywordInjector + 'static) -> Self {
+        let injector = Arc::new(injector);
+        let component_id = injector.component_id().to_string();
+        assert!(
+            self.by_id
+                .insert(
+                    component_id,
+                    ComponentEntry::KeywordInjector(injector.clone()),
+                )
+                .is_none(),
+            "KeywordInjector 组件 id 重复：{}",
+            injector.component_id()
+        );
+        self.keyword_injectors.push(injector);
         self
     }
 
@@ -390,6 +484,46 @@ async fn dispatch(
                     priority: ex.priority(),
                 });
             }
+            for engine in &app.search_engines {
+                components.push(ComponentDescriptor {
+                    component_id: engine.component_id().to_string(),
+                    component_name: engine.component_name().to_string(),
+                    component_description: engine.component_description().to_string(),
+                    component_type: engine.component_type(),
+                    kind: ComponentKind::SearchEngine,
+                    priority: engine.priority(),
+                });
+            }
+            for booster in &app.score_boosters {
+                components.push(ComponentDescriptor {
+                    component_id: booster.component_id().to_string(),
+                    component_name: booster.component_name().to_string(),
+                    component_description: booster.component_description().to_string(),
+                    component_type: booster.component_type(),
+                    kind: ComponentKind::ScoreBooster,
+                    priority: booster.priority(),
+                });
+            }
+            for optimizer in &app.keyword_optimizers {
+                components.push(ComponentDescriptor {
+                    component_id: optimizer.component_id().to_string(),
+                    component_name: optimizer.component_name().to_string(),
+                    component_description: optimizer.component_description().to_string(),
+                    component_type: optimizer.component_type(),
+                    kind: ComponentKind::KeywordOptimizer,
+                    priority: optimizer.priority(),
+                });
+            }
+            for injector in &app.keyword_injectors {
+                components.push(ComponentDescriptor {
+                    component_id: injector.component_id().to_string(),
+                    component_name: injector.component_name().to_string(),
+                    component_description: injector.component_description().to_string(),
+                    component_type: injector.component_type(),
+                    kind: ComponentKind::KeywordInjector,
+                    priority: injector.priority(),
+                });
+            }
             Ok(serde_json::to_value(components).unwrap_or_default())
         }
         // 返回指定组件的注册配置项
@@ -528,6 +662,63 @@ async fn dispatch(
             };
             Ok(serde_json::to_value(result).unwrap_or_default())
         }
+        // SearchEngine 组件：对缓存候选计算分数（候选快照保真还原，
+        // 插件进程内按原 id / 原顺序可回查）
+        plugin_methods::CALCULATE_SCORES => {
+            let p: CalculateScoresParams = serde_json::from_value(params.clone())
+                .map_err(|e| JsonRpcError::new(codes::INVALID_PARAMS, e.to_string()))?;
+            let engine = find_search_engine(app, &p.component_id)?;
+            let cache = CachedCandidateData::from_data(p.candidates);
+            let scored = engine.calculate_scores(&cache, &p.query).await;
+            Ok(serde_json::to_value(scored).unwrap_or_default())
+        }
+        // ScoreBooster 组件：增强分数（返回增强后的完整列表，索引与传入一致）
+        plugin_methods::BOOSTER_BOOST => {
+            let p: BoosterBoostParams = serde_json::from_value(params.clone())
+                .map_err(|e| JsonRpcError::new(codes::INVALID_PARAMS, e.to_string()))?;
+            let booster = find_score_booster(app, &p.component_id)?;
+            let cache = CachedCandidateData::from_data(p.candidates);
+            let mut scored = p.scored;
+            booster.boost(&mut scored, &cache, &p.query).await;
+            Ok(serde_json::to_value(scored).unwrap_or_default())
+        }
+        // ScoreBooster 组件：记录用户确认（选中候选 → 学习用户习惯）
+        plugin_methods::BOOSTER_RECORD => {
+            let p: BoosterRecordParams = serde_json::from_value(params.clone())
+                .map_err(|e| JsonRpcError::new(codes::INVALID_PARAMS, e.to_string()))?;
+            let booster = find_score_booster(app, &p.component_id)?;
+            let cache = CachedCandidateData::from_data(p.candidates);
+            booster.record(p.candidate_id, &cache, &p.query).await;
+            Ok(serde_json::Value::Null)
+        }
+        // KeywordOptimizer 组件：动态属性（uses_context / priority 为设置可变字段）
+        plugin_methods::KEYWORD_OPTIMIZER_INFO => {
+            let p: KeywordOptimizerInfoParams = serde_json::from_value(params.clone())
+                .map_err(|e| JsonRpcError::new(codes::INVALID_PARAMS, e.to_string()))?;
+            let optimizer = find_keyword_optimizer(app, &p.component_id)?;
+            Ok(serde_json::to_value(KeywordOptimizerInfo {
+                uses_context: optimizer.uses_context(),
+                priority: optimizer.get_priority(),
+            })
+            .unwrap_or_default())
+        }
+        // KeywordOptimizer 组件：优化单个关键词
+        plugin_methods::KEYWORD_OPTIMIZE => {
+            let p: KeywordOptimizeParams = serde_json::from_value(params.clone())
+                .map_err(|e| JsonRpcError::new(codes::INVALID_PARAMS, e.to_string()))?;
+            let optimizer = find_keyword_optimizer(app, &p.component_id)?;
+            Ok(serde_json::to_value(optimizer.optimize(&p.keyword).await).unwrap_or_default())
+        }
+        // KeywordInjector 组件：对单个候选注入关键词
+        plugin_methods::KEYWORD_INJECT => {
+            let p: KeywordInjectParams = serde_json::from_value(params.clone())
+                .map_err(|e| JsonRpcError::new(codes::INVALID_PARAMS, e.to_string()))?;
+            let injector = find_keyword_injector(app, &p.component_id)?;
+            Ok(
+                serde_json::to_value(injector.inject_keywords(&p.candidate).await)
+                    .unwrap_or_default(),
+            )
+        }
         _ => Err(JsonRpcError::new(
             codes::METHOD_NOT_FOUND,
             format!("method not found: {}", method),
@@ -551,6 +742,10 @@ fn find_configurable<'a>(
         ComponentEntry::Plugin(p) => p.as_ref() as &dyn Configurable,
         ComponentEntry::DataSource(ds) => ds.as_ref() as &dyn Configurable,
         ComponentEntry::Executor(ex) => ex.as_ref() as &dyn Configurable,
+        ComponentEntry::SearchEngine(engine) => engine.as_ref() as &dyn Configurable,
+        ComponentEntry::ScoreBooster(booster) => booster.as_ref() as &dyn Configurable,
+        ComponentEntry::KeywordOptimizer(optimizer) => optimizer.as_ref() as &dyn Configurable,
+        ComponentEntry::KeywordInjector(injector) => injector.as_ref() as &dyn Configurable,
     })
 }
 
@@ -586,6 +781,77 @@ fn find_executor<'a>(
         None => Err(JsonRpcError::new(
             codes::METHOD_NOT_FOUND,
             format!("executor not found: {component_id}"),
+        )),
+    }
+}
+/// 按 component_id 查找 SearchEngine 组件。
+fn find_search_engine<'a>(
+    app: &'a PluginApp,
+    component_id: &str,
+) -> Result<&'a dyn SearchEngine, JsonRpcError> {
+    match app.by_id.get(component_id) {
+        Some(ComponentEntry::SearchEngine(engine)) => Ok(engine.as_ref()),
+        Some(_) => Err(JsonRpcError::new(
+            codes::METHOD_NOT_FOUND,
+            format!("component is not a search engine: {component_id}"),
+        )),
+        None => Err(JsonRpcError::new(
+            codes::METHOD_NOT_FOUND,
+            format!("search engine not found: {component_id}"),
+        )),
+    }
+}
+
+/// 按 component_id 查找 ScoreBooster 组件。
+fn find_score_booster<'a>(
+    app: &'a PluginApp,
+    component_id: &str,
+) -> Result<&'a dyn ScoreBooster, JsonRpcError> {
+    match app.by_id.get(component_id) {
+        Some(ComponentEntry::ScoreBooster(booster)) => Ok(booster.as_ref()),
+        Some(_) => Err(JsonRpcError::new(
+            codes::METHOD_NOT_FOUND,
+            format!("component is not a score booster: {component_id}"),
+        )),
+        None => Err(JsonRpcError::new(
+            codes::METHOD_NOT_FOUND,
+            format!("score booster not found: {component_id}"),
+        )),
+    }
+}
+
+/// 按 component_id 查找 KeywordOptimizer 组件。
+fn find_keyword_optimizer<'a>(
+    app: &'a PluginApp,
+    component_id: &str,
+) -> Result<&'a dyn KeywordOptimizer, JsonRpcError> {
+    match app.by_id.get(component_id) {
+        Some(ComponentEntry::KeywordOptimizer(optimizer)) => Ok(optimizer.as_ref()),
+        Some(_) => Err(JsonRpcError::new(
+            codes::METHOD_NOT_FOUND,
+            format!("component is not a keyword optimizer: {component_id}"),
+        )),
+        None => Err(JsonRpcError::new(
+            codes::METHOD_NOT_FOUND,
+            format!("keyword optimizer not found: {component_id}"),
+        )),
+    }
+}
+
+/// 按 component_id 查找 KeywordInjector 组件。
+fn find_keyword_injector<'a>(
+    app: &'a PluginApp,
+    component_id: &str,
+) -> Result<&'a dyn KeywordInjector, JsonRpcError> {
+    match app.by_id.get(component_id) {
+        Some(ComponentEntry::KeywordInjector(injector)) => Ok(injector.as_ref()),
+        Some(_) => Err(JsonRpcError::new(
+            codes::METHOD_NOT_FOUND,
+            format!("component is not a keyword injector: {component_id}"),
+        )),
+        None => Err(JsonRpcError::new(
+            codes::METHOD_NOT_FOUND,
+            format!("keyword injector not found: {component_id}"),
         )),
     }
 }

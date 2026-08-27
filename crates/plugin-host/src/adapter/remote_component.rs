@@ -12,9 +12,10 @@ use zerolaunch_plugin_api::config::{
     ComponentCore, ComponentType, ConfigActionDef, ConfigError, Configurable, SettingDefinition,
 };
 use zerolaunch_plugin_api::{
-    ActionExecutor, CachedCandidateData, DataSource, ExecutionContext, ExecutionError,
-    PanelInteraction, Plugin, PluginContext, PluginError, PluginHandle, PluginMetadata, Query,
-    QueryResponse, ResultAction, TargetType,
+    ActionExecutor, CachedCandidateData, CandidateId, DataSource, ExecutionContext, ExecutionError,
+    KeywordInjector, KeywordOptimizer, PanelInteraction, Plugin, PluginContext, PluginError,
+    PluginHandle, PluginMetadata, Query, QueryResponse, ResultAction, ScoreBooster,
+    ScoredCandidate, SearchCandidate, SearchEngine, TargetType,
 };
 
 use crate::client::JsonRpcClient;
@@ -34,6 +35,8 @@ pub enum RemoteComponentKind {
         target_types: Vec<TargetType>,
         result_actions: Vec<ResultAction>,
     },
+    /// 搜索引擎 —— 参与搜索管道（与内置引擎互斥，仅允许一个启用）。
+    SearchEngine,
     Plugin {
         /// 插件级元数据 —— 与 `PluginRegistration.metadata` 共享同一 `Arc`（唯一源），
         /// 由 build_components 一次性构造后不可变。
@@ -43,6 +46,16 @@ pub enum RemoteComponentKind {
         /// 内置插件在每次会话推送时同步求值，远端以此对齐）。
         interaction_policy: RwLock<PanelInteraction>,
     },
+    /// 分数增强器 —— 引擎打分后追加分数修正（多个可同时启用）。
+    ScoreBooster,
+    /// 关键词优化器 —— 候选管道中扩展关键词。
+    /// 优化属性（uses_context / priority）为设置可变字段，经 keyword_optimizer_info
+    /// RPC 拉取缓存（discover 初始值），设置变更时经 RPC 刷新。
+    KeywordOptimizer {
+        info: RwLock<KeywordOptimizerInfo>,
+    },
+    /// 关键词注入器 —— 基于候选项完整上下文注入额外关键词。
+    KeywordInjector,
 }
 
 pub struct RemoteComponent {
@@ -128,6 +141,29 @@ impl RemoteComponent {
     pub fn as_plugin(self: Arc<Self>) -> Option<Arc<dyn Plugin>> {
         matches!(self.kind, RemoteComponentKind::Plugin { .. }).then(|| self as Arc<dyn Plugin>)
     }
+    /// 将自身转换为 `SearchEngine` trait object，仅在 kind 为 SearchEngine 时成功。
+    pub fn as_search_engine(self: Arc<Self>) -> Option<Arc<dyn SearchEngine>> {
+        matches!(self.kind, RemoteComponentKind::SearchEngine)
+            .then(|| self as Arc<dyn SearchEngine>)
+    }
+
+    /// 将自身转换为 `ScoreBooster` trait object，仅在 kind 为 ScoreBooster 时成功。
+    pub fn as_score_booster(self: Arc<Self>) -> Option<Arc<dyn ScoreBooster>> {
+        matches!(self.kind, RemoteComponentKind::ScoreBooster)
+            .then(|| self as Arc<dyn ScoreBooster>)
+    }
+
+    /// 将自身转换为 `KeywordOptimizer` trait object，仅在 kind 为 KeywordOptimizer 时成功。
+    pub fn as_keyword_optimizer(self: Arc<Self>) -> Option<Arc<dyn KeywordOptimizer>> {
+        matches!(self.kind, RemoteComponentKind::KeywordOptimizer { .. })
+            .then(|| self as Arc<dyn KeywordOptimizer>)
+    }
+
+    /// 将自身转换为 `KeywordInjector` trait object，仅在 kind 为 KeywordInjector 时成功。
+    pub fn as_keyword_injector(self: Arc<Self>) -> Option<Arc<dyn KeywordInjector>> {
+        matches!(self.kind, RemoteComponentKind::KeywordInjector)
+            .then(|| self as Arc<dyn KeywordInjector>)
+    }
 
     pub fn is_data_source(&self) -> bool {
         matches!(self.kind, RemoteComponentKind::DataSource)
@@ -139,6 +175,25 @@ impl RemoteComponent {
 
     pub fn is_plugin(&self) -> bool {
         matches!(self.kind, RemoteComponentKind::Plugin { .. })
+    }
+    /// 是否为搜索引擎组件。
+    pub fn is_search_engine(&self) -> bool {
+        matches!(self.kind, RemoteComponentKind::SearchEngine)
+    }
+
+    /// 是否为分数增强器组件。
+    pub fn is_score_booster(&self) -> bool {
+        matches!(self.kind, RemoteComponentKind::ScoreBooster)
+    }
+
+    /// 是否为关键词优化器组件。
+    pub fn is_keyword_optimizer(&self) -> bool {
+        matches!(self.kind, RemoteComponentKind::KeywordOptimizer { .. })
+    }
+
+    /// 是否为关键词注入器组件。
+    pub fn is_keyword_injector(&self) -> bool {
+        matches!(self.kind, RemoteComponentKind::KeywordInjector)
     }
 }
 #[async_trait]
@@ -184,6 +239,9 @@ impl Configurable for RemoteComponent {
         // 应用成功后立即刷新策略缓存，避免 reemit_current_session 推送旧策略
         // （内置插件每次推送同步求值，远端以此对齐）。
         self.refresh_interaction_policy().await;
+        if self.is_keyword_optimizer() {
+            self.refresh_keyword_optimizer_info().await;
+        }
         Ok(())
     }
 
@@ -487,6 +545,228 @@ impl RemoteComponent {
             .await;
         if let Ok(policy) = result {
             *interaction_policy.write() = policy;
+        }
+    }
+    /// 经 RPC 刷新优化器属性缓存（uses_context / priority 为设置可变字段）。
+    /// 仅 KeywordOptimizer 组件有属性；失败静默保持上次值。
+    async fn refresh_keyword_optimizer_info(&self) {
+        let RemoteComponentKind::KeywordOptimizer { info } = &self.kind else {
+            return;
+        };
+        let result: Result<KeywordOptimizerInfo, _> = self
+            .client
+            .call(
+                plugin_methods::KEYWORD_OPTIMIZER_INFO,
+                KeywordOptimizerInfoParams {
+                    component_id: self.core.component_id().to_string(),
+                },
+                Duration::from_secs(5),
+            )
+            .await;
+        match result {
+            Ok(meta) => *info.write() = meta,
+            Err(e) => {
+                // 刷新失败保留上次值（候选管道按旧属性排序），告警便于诊断，不阻断设置流程。
+                tracing::warn!(
+                    "KeywordOptimizer {} 属性刷新失败: {}",
+                    self.core.component_id(),
+                    e
+                );
+            }
+        }
+    }
+}
+#[async_trait]
+impl SearchEngine for RemoteComponent {
+    async fn calculate_scores(
+        &self,
+        candidates: &CachedCandidateData,
+        query: &str,
+    ) -> Vec<ScoredCandidate> {
+        assert!(
+            matches!(self.kind, RemoteComponentKind::SearchEngine),
+            "RemoteComponent {} is not a SearchEngine but calculate_scores() was called",
+            self.core.component_id()
+        );
+        let result: Result<Vec<ScoredCandidate>, _> = self
+            .client
+            .call(
+                plugin_methods::CALCULATE_SCORES,
+                CalculateScoresParams {
+                    component_id: self.core.component_id().to_string(),
+                    candidates: candidates.to_data(),
+                    query: query.to_string(),
+                },
+                Duration::from_secs(5),
+            )
+            .await;
+        match result {
+            Ok(scored) => scored,
+            Err(e) => {
+                // 远端引擎故障：本次查询退化为空结果（插件禁用即恢复），不静默回退本地引擎。
+                tracing::error!(
+                    "SearchEngine {} calculate_scores failed: {}",
+                    self.core.component_id(),
+                    e
+                );
+                Vec::new()
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl ScoreBooster for RemoteComponent {
+    async fn record(&self, candidate_id: CandidateId, data: &CachedCandidateData, query: &str) {
+        assert!(
+            matches!(self.kind, RemoteComponentKind::ScoreBooster),
+            "RemoteComponent {} is not a ScoreBooster but record() was called",
+            self.core.component_id()
+        );
+        let result: Result<serde_json::Value, _> = self
+            .client
+            .call(
+                plugin_methods::BOOSTER_RECORD,
+                BoosterRecordParams {
+                    component_id: self.core.component_id().to_string(),
+                    candidate_id,
+                    candidates: data.to_data(),
+                    query: query.to_string(),
+                },
+                Duration::from_secs(2),
+            )
+            .await;
+        if let Err(e) = result {
+            tracing::warn!(
+                "ScoreBooster {} record failed: {}",
+                self.core.component_id(),
+                e
+            );
+        }
+    }
+
+    async fn boost(
+        &self,
+        candidates: &mut Vec<ScoredCandidate>,
+        data: &CachedCandidateData,
+        query: &str,
+    ) {
+        assert!(
+            matches!(self.kind, RemoteComponentKind::ScoreBooster),
+            "RemoteComponent {} is not a ScoreBooster but boost() was called",
+            self.core.component_id()
+        );
+        let result: Result<Vec<ScoredCandidate>, _> = self
+            .client
+            .call(
+                plugin_methods::BOOSTER_BOOST,
+                BoosterBoostParams {
+                    component_id: self.core.component_id().to_string(),
+                    candidates: data.to_data(),
+                    scored: candidates.clone(),
+                    query: query.to_string(),
+                },
+                Duration::from_secs(5),
+            )
+            .await;
+        match result {
+            Ok(scored) => *candidates = scored,
+            Err(e) => {
+                // 增强失败：保留引擎原分数（无增强，结果不劣于无该组件）。
+                tracing::warn!(
+                    "ScoreBooster {} boost failed: {}",
+                    self.core.component_id(),
+                    e
+                );
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl KeywordOptimizer for RemoteComponent {
+    async fn optimize(&self, keyword: &str) -> Vec<String> {
+        assert!(
+            matches!(self.kind, RemoteComponentKind::KeywordOptimizer { .. }),
+            "RemoteComponent {} is not a KeywordOptimizer but optimize() was called",
+            self.core.component_id()
+        );
+        let result: Result<Vec<String>, _> = self
+            .client
+            .call(
+                plugin_methods::KEYWORD_OPTIMIZE,
+                KeywordOptimizeParams {
+                    component_id: self.core.component_id().to_string(),
+                    keyword: keyword.to_string(),
+                },
+                Duration::from_secs(10),
+            )
+            .await;
+        match result {
+            Ok(keywords) => keywords,
+            Err(e) => {
+                // 优化失败：跳过该组件（召回略降，候选仍可搜索）。
+                tracing::warn!(
+                    "KeywordOptimizer {} optimize failed: {}",
+                    self.core.component_id(),
+                    e
+                );
+                Vec::new()
+            }
+        }
+    }
+
+    fn uses_context(&self) -> bool {
+        match &self.kind {
+            RemoteComponentKind::KeywordOptimizer { info } => info.read().uses_context,
+            _ => panic!(
+                "RemoteComponent {} is not a KeywordOptimizer but uses_context() was called",
+                self.core.component_id()
+            ),
+        }
+    }
+
+    fn get_priority(&self) -> u32 {
+        match &self.kind {
+            RemoteComponentKind::KeywordOptimizer { info } => info.read().priority,
+            _ => panic!(
+                "RemoteComponent {} is not a KeywordOptimizer but get_priority() was called",
+                self.core.component_id()
+            ),
+        }
+    }
+}
+
+#[async_trait]
+impl KeywordInjector for RemoteComponent {
+    async fn inject_keywords(&self, candidate: &SearchCandidate) -> Vec<String> {
+        assert!(
+            matches!(self.kind, RemoteComponentKind::KeywordInjector),
+            "RemoteComponent {} is not a KeywordInjector but inject_keywords() was called",
+            self.core.component_id()
+        );
+        let result: Result<Vec<String>, _> = self
+            .client
+            .call(
+                plugin_methods::KEYWORD_INJECT,
+                KeywordInjectParams {
+                    component_id: self.core.component_id().to_string(),
+                    candidate: candidate.clone(),
+                },
+                Duration::from_secs(10),
+            )
+            .await;
+        match result {
+            Ok(keywords) => keywords,
+            Err(e) => {
+                // 注入失败：跳过该组件（召回略降，候选仍可搜索）。
+                tracing::warn!(
+                    "KeywordInjector {} inject_keywords failed: {}",
+                    self.core.component_id(),
+                    e
+                );
+                Vec::new()
+            }
         }
     }
 }

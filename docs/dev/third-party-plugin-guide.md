@@ -102,6 +102,38 @@ fn main() {
 }
 ```
 
+### 2.1 搜索流水线组件（可选）
+
+第三方插件与内置插件对等，可注册搜索流水线上的全部组件类型：
+
+| 组件 | SDK 注册方法 | 管道位置 | 协议语义 |
+|---|---|---|---|
+| `DataSource` | `with_data_source` | 候选采集 | `plugin/fetch_candidates` |
+| `KeywordOptimizer` | `with_keyword_optimizer` | 关键词扩展 | `plugin/keyword_optimize`（逐候选逐组件，链序由宿主按 `priority` 控制） |
+| `KeywordInjector` | `with_keyword_injector` | 别名/上下文关键词 | `plugin/keyword_inject`（逐候选） |
+| `SearchEngine` | `with_search_engine` | 搜索打分 | `plugin/calculate_scores`（每查询一次，与内置引擎互斥启用） |
+| `ScoreBooster` | `with_score_booster` | 分数增强 | `plugin/booster_boost`（每查询一次）+ `plugin/booster_record`（确认时学习） |
+| `ActionExecutor` | `with_executor` | 候选执行 | `plugin/executor_execute` |
+
+```rust
+PluginApp::new(MyPlugin)
+    .with_score_booster(MySemanticBooster::new())   // ScoreBooster 组件（自己的 component_id）
+    .run()
+```
+
+关键契约：
+
+- 每个组件都是独立的 `Configurable`（各自的 `component_id` / schema / 设置），
+  manifest `provides` 只需声明插件主能力；组件清单由进程 `plugin/get_components` 上报，
+  宿主按声明接入对应管道——**无需为组件写 manifest 配置段**。
+- `KeywordOptimizer` 的 `uses_context` / `priority` 是**设置可变字段**，宿主经
+  `plugin/keyword_optimizer_info` 拉取并缓存，设置变更时刷新——勿在 `ComponentKind`
+  中声明静态值。
+- 组件故障降级（宿主侧边界）：搜索引擎异常 → 本次查询空结果（禁用即恢复）；
+  增强器异常 → 保留引擎原分数；优化器/注入器异常 → 跳过该组件（召回略降）。
+- 设置页按 `ComponentType` 通用渲染，第三方组件自动出现在对应分组
+  （引擎互斥开关等前端逻辑对第三方引擎同样生效）。
+
 ### 3. 编写 manifest.toml
 
 ```toml

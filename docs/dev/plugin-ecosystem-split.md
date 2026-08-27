@@ -183,13 +183,47 @@
 2. **副标题信息化**：插件候选 subtitle = 插件描述（可读性优先），描述缺失时兜底 `plugin id: {id}`——不再空副标题。
 3. 验证：cargo check（src-tauri + workspace）/ vue-tsc 零错误；91 测试通过。
 
-### 第八次迭代（待做）
+### 第八次迭代（2026-08-26，已完成 — 搜索流水线组件契约补齐）
 
-1. 语义搜索插件（方案 A：触发词模式，用 `host().enumerate_apps()` 建索引 + 本地 embedding）。
-2. 安装到宿主做 CDP 真实验证（设置 → 插件管理 → 安装本地插件 → `ev <查询>`）。
-3. 模板待补：`.gitignore`（target/dist）、CI（.github，当前模板没有）、`minHostVersion` 按新 API 需求调整。
-4. 提交当前大量未提交工作区变更（建议按轮次/领域拆分 commit）。
-5. 发布前置：license `GPLv3` 修正为 `GPL-3.0-only`（crates.io 阻塞项）。
+**用户反馈**：语义搜索插件需要挂进默认搜索管道；第三方插件应完全支持搜索流水线组件。经分析确认方案：开放全部搜索流水线组件（源自 docs §3.2 方案 B）。
+
+1. **trait async 化**（`plugin-api`）：`SearchEngine`/`ScoreBooster`/`KeywordOptimizer`/`KeywordInjector` 全部方法 `#[async_trait]`（对齐 `DataSource` 先例，进程内/远端同一 `Arc<dyn Trait>` 零特判）；内置实现仅签名 async（函数体不变）；`CachedCandidateData` derive `Clone` + 新增 `to_data()`/`from_data()`（`CandidateCacheSnapshot` 跨 RPC 快照，携带候选列表与 next_candidate_id——id 与位置一一对应、无删除，index/去重集合由快照确定性派生，`from_data` 以 debug_assert 校验；`add_candidate` 会重写 id/去重，会破坏宿主混合缓存的 id 对应，故引擎/增强器路径必须走快照而非逐条 add）。
+2. **协议扩展**（`plugin-protocol`）：`ComponentKind` +4 变体（`search_engine`/`score_booster`/`keyword_optimizer`/`keyword_injector`），`REQUIRED_PROVIDES_VALUES` 同步；新 RPC：`calculate_scores` / `booster_boost` / `booster_record` / `keyword_optimizer_info` / `keyword_optimize` / `keyword_inject`（逐候选——注入器批量无收益，低频 collect 下逐候选更简、与优化器同构）。
+3. **SDK**（`plugin-sdk-rust`）：`PluginApp` +4 集合 + `ComponentEntry` +4 + `with_search_engine/with_score_booster/with_keyword_optimizer/with_keyword_injector` + dispatch 分支 + `find_*`。
+4. **宿主**（`plugin-host`）：`RemoteComponentKind` +4、`RemoteComponent` 实现 4 trait（RPC 桥接）、`discover` 拉取 `KeywordOptimizerInfo`（uses_context/priority 为设置可变字段，缓存 + apply_settings 刷新）、`build_components` 匹配扩展。
+5. **调度**（`src-tauri`）：`SessionDispatcher` 注册/解注册 +4 类（含搜索管道重建——此前 PluginRegistered 只重建候选管道）；`SearchPipeline`/`CandidatePipeline` async 化；**锁快照化**——`route_query`/`execute_candidate`/调试搜索先快照 `CachedCandidateData`+`SearchPipeline` 再 await（远端 RPC 期间不跨 await 持 parking_lot 锁）。
+6. **降级策略**：搜索引擎异常 → 空结果；增强器异常 → 保留原分数；优化器/注入器异常 → 跳过组件。
+7. **验证**：`cargo check --workspace --all-targets` 零错误；211 测试通过（含新增 `component_kind_stable_serde_keys` / `keyword_optimizer_info_roundtrip` 契约测试）。
+8. **语义搜索插件映射**（下轮）：ScoreBooster 语义重排（embedding 相似度加成，与内置引擎共存不互斥，每查询一次 `booster_boost`），远超原方案 A 的触发词降级。
+9. 文档：`third-party-plugin-guide.md` 新增「搜索流水线组件（可选）」章节；`.omp/rules/third-party-plugin.md` 更新（原"第一版不开放"描述已过时）。
+
+### 第九次迭代（2026-08-26，已完成 — AI 语义搜索插件实现）
+
+**用户决策**：推理后端回到 onnxruntime（旧版同款，用户有使用经验；模型即旧版 EmbeddingGemma-300m）；
+CUDA 不需要（CPU 逐条计算 embedding 即可）。模型验证来源 = 用户托管的 `ZeroLaunch-rs` release/model
+（`EmbeddingGemma-300m.zip`，内含 model.onnx / model.onnx_data / tokenizer.json / tokenizer_config.json）。
+
+1. **后端选型**：`ort 2.0.0-rc.13`（`load-dynamic` + `ndarray` features，默认关）——不用
+   `download-binaries`：其 Windows x64 预编译仅发布 GPU 特征集（无纯 CPU 条目）。运行时从
+   `onnxruntime.dll`（微软官方 v1.20.1 预编译，init_from 显式路径加载，与插件 exe 分离）、
+   模型 zip 解压均**首启下载到插件目录**（插件 zip 自包含仅 4 文件，~90MB 模型不随包分发）。
+   tokenizers 0.22（Gemma pad_token 从 tokenizer_config.json 读取，BatchLongest 右填充）。
+2. **实现**（`zerolaunch-plugin-ai-search/`）：AiSearchPlugin（纯元数据壳，无触发词/面板，`ui/panel.mjs`
+   删除）+ SemanticBooster（ScoreBooster）——宿主引擎打分后按嵌入余弦相似度 × semantic_weight 加成；
+   候选嵌入按执行目标 payload 缓存（低频变化跨查询复用）；模型惰性加载（失败置 Failed 防重试，
+   设置变更重置）、推理经 spawn_blocking 串行（Session::run 需 &mut）。manifest
+   `provides = ["plugin", "score_booster"]`，minHostVersion 1.2.0。设置项：semantic_weight /
+   model_url（镜像覆盖）/ model_dir。
+3. **验证**（用户模型 release 实测）：模型下载 → 解压（zip 内还有一层同名目录，解压剥离公共顶层
+   目录，修复 strip_prefix 残留前导 '/' 导致写入 C:\ 根被拒的 bug）→ dll 下载 → onnxruntime 初始化
+   → 推理。结果：dim=768；`sim(wechat, 微信)=0.875` vs `sim(wechat, orbit)=0.526`——语义区分有效。
+   全链路零错误；`package.py` 产物 `dist/com.ghost-him.ai-search-0.1.0.zip`（manifest + bin exe + i18n）。
+4. 遗留：安装到宿主做 CDP 真实验证（待宿主构建）；模型/dll 首启下载需网络（离线首启为 no-op 降级）。
+
+### 第十次迭代（待做）
+
+1. 插件安装到宿主 CDP 真实验证（设置 → 插件管理 → 安装插件 → 搜索 + 语义重排效果）。
+2. 模板待补与发布前置（同第八次旧清单）。
 
 ### 序列化键名契约固化（code review 第七次迭代补充）
 

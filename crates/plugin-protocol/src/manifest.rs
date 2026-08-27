@@ -117,7 +117,15 @@ fn default_provides() -> Vec<String> {
 }
 
 /// 必须存在的 manifest 字段。
-pub const REQUIRED_PROVIDES_VALUES: &[&str] = &["plugin", "data_source", "action_executor"];
+pub const REQUIRED_PROVIDES_VALUES: &[&str] = &[
+    "plugin",
+    "data_source",
+    "action_executor",
+    "search_engine",
+    "score_booster",
+    "keyword_optimizer",
+    "keyword_injector",
+];
 
 /// 反向域名格式插件 ID 的正则表达式。
 pub const PLUGIN_ID_RE: &str = r"^[a-z][a-z0-9]*(\.[a-z][a-z0-9_-]*)+$";

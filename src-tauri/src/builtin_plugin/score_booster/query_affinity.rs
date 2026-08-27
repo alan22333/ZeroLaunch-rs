@@ -251,9 +251,10 @@ impl Configurable for QueryAffinityBooster {
     }
 }
 
+#[async_trait]
 impl ScoreBooster for QueryAffinityBooster {
     /// 记录查询-候选项启动关联
-    fn record(&self, candidate_id: CandidateId, data: &CachedCandidateData, query: &str) {
+    async fn record(&self, candidate_id: CandidateId, data: &CachedCandidateData, query: &str) {
         if query.trim().is_empty() {
             return;
         }
@@ -275,7 +276,7 @@ impl ScoreBooster for QueryAffinityBooster {
     }
 
     /// 基于查询亲和度增强候选项分数
-    fn boost(
+    async fn boost(
         &self,
         candidates: &mut Vec<ScoredCandidate>,
         data: &CachedCandidateData,

@@ -160,8 +160,9 @@ impl Configurable for PinyinConverter {
     }
 }
 
+#[async_trait]
 impl KeywordOptimizer for PinyinConverter {
-    fn optimize(&self, keyword: &str) -> Vec<String> {
+    async fn optimize(&self, keyword: &str) -> Vec<String> {
         self.inner.read().optimize(keyword)
     }
 
@@ -178,24 +179,24 @@ impl KeywordOptimizer for PinyinConverter {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_convert_chinese_only() {
+    #[tokio::test]
+    async fn test_convert_chinese_only() {
         let converter = PinyinConverter::new();
-        let result = converter.optimize("微信");
+        let result = converter.optimize("微信").await;
         assert_eq!(result, vec!["wei xin"]);
     }
 
-    #[test]
-    fn test_convert_mixed() {
+    #[tokio::test]
+    async fn test_convert_mixed() {
         let converter = PinyinConverter::new();
-        let result = converter.optimize("微信WeChat");
+        let result = converter.optimize("微信WeChat").await;
         assert_eq!(result, vec!["wei xin WeChat"]);
     }
 
-    #[test]
-    fn test_convert_ascii_only() {
+    #[tokio::test]
+    async fn test_convert_ascii_only() {
         let converter = PinyinConverter::new();
-        let result = converter.optimize("chrome");
+        let result = converter.optimize("chrome").await;
         assert_eq!(result, vec!["chrome"]);
     }
 }
