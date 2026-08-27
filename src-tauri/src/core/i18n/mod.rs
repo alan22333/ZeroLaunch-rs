@@ -146,7 +146,7 @@ impl I18nManager {
                 .and_then(|s| serde_json::from_str::<Value>(&s).map_err(|e| e.to_string()));
             match parsed {
                 Ok(value @ Value::Object(_)) if validate_plugin_catalog(&value) => {
-                    catalogs.insert(lang, value);
+                    catalogs.insert(lang, expand_dotted_keys(value));
                 }
                 Ok(_) => warn!(
                     "插件 {} 的语言包 '{}' 结构非法（仅允许对象与字符串），已跳过",
@@ -237,6 +237,43 @@ fn validate_plugin_catalog(value: &Value) -> bool {
     }
 }
 
+/// 将插件语言包的 flat 键（如 "booster.name"）展开为嵌套对象
+/// （`{"booster": {"name": …}}`）。vue-i18n 按点拆分路径查找消息，
+/// 不认带点的字面键；插件语言包键即 `t_key` 路径片段，须在落地前展开。
+/// 值为嵌套对象的键原样保留并递归展开；无点键不受影响。
+fn expand_dotted_keys(value: Value) -> Value {
+    let Value::Object(map) = value else {
+        return value;
+    };
+    let mut out = serde_json::Map::new();
+    for (key, val) in map {
+        let segments: Vec<&str> = key.split('.').collect();
+        insert_expanded(&mut out, &segments, expand_dotted_keys(val));
+    }
+    Value::Object(out)
+}
+
+/// 按点分段逐层插入：段数 >1 时创建/进入对象节点，最后一段放置值。
+/// 同名段下对象与叶子值混用（如 "a" 与 "a.b"）时对象优先，保证树形合法。
+fn insert_expanded(map: &mut serde_json::Map<String, Value>, segments: &[&str], value: Value) {
+    if segments.len() == 1 {
+        map.insert(segments[0].to_string(), value);
+        return;
+    }
+    let seg = segments[0].to_string();
+    let entry = map
+        .entry(seg)
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    match entry {
+        Value::Object(inner) => insert_expanded(inner, &segments[1..], value),
+        _ => {
+            let mut inner = serde_json::Map::new();
+            insert_expanded(&mut inner, &segments[1..], value);
+            *entry = Value::Object(inner);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,6 +339,36 @@ mod tests {
             .as_object()
             .unwrap()
             .is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// flat 键语言包（如 "booster.name"）落地前展开为嵌套树，
+    /// 与 vue-i18n 按点拆分路径的查找语义一致；无点键不受影响。
+    #[test]
+    fn plugin_catalog_expands_dotted_keys() {
+        let mgr = test_manager();
+        let dir = std::env::temp_dir().join(format!("zl-i18n-test-dotted-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("i18n")).unwrap();
+        std::fs::write(
+            dir.join("i18n/zh-Hans.json"),
+            r#"{"plugin.name":"AI 语义搜索","booster.name":"语义重排器","greeting":"你好"}"#,
+        )
+        .unwrap();
+        mgr.register_plugin_catalog("com.test.demo", &dir);
+
+        let catalog = mgr.plugin_catalog_for("zh-Hans");
+        assert_eq!(
+            catalog["plugin"]["com"]["test"]["demo"]["plugin"]["name"].as_str(),
+            Some("AI 语义搜索")
+        );
+        assert_eq!(
+            catalog["plugin"]["com"]["test"]["demo"]["booster"]["name"].as_str(),
+            Some("语义重排器")
+        );
+        assert_eq!(
+            catalog["plugin"]["com"]["test"]["demo"]["greeting"].as_str(),
+            Some("你好")
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -395,7 +395,18 @@ impl PluginManager {
         {
             // 回滚：加载失败（如组件 id 冲突）时删除已落盘的插件目录，
             // 避免 UI 不可见、不可卸载、每次启动重试加载的残留目录。
-            let _ = std::fs::remove_dir_all(&installed_dir);
+            // 进程退出后文件句柄可能延迟释放（Windows），重试一次仍失败则告警。
+            if let Err(rm_err) = std::fs::remove_dir_all(&installed_dir) {
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                if let Err(rm_err2) = std::fs::remove_dir_all(&installed_dir) {
+                    warn!(
+                        "安装失败后清理插件目录失败: {}（首次: {};目录: {}）",
+                        rm_err2,
+                        rm_err,
+                        installed_dir.display()
+                    );
+                }
+            }
             return Err(e);
         }
 

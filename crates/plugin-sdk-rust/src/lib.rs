@@ -44,6 +44,15 @@ pub(crate) fn set_plugin_id(plugin_id: &str) {
 ///
 /// 在插件运行时初始化（`run()` 之后的握手）之前调用将 panic，
 /// 因为此时尚不知道插件 id。
+/// 从环境变量 `ZEROLAUNCH_PLUGIN_ID` 预置插件 id，使 `t_key()` 可在组件构造
+/// （`main()` 中、`run()` 之前）使用。宿主 spawn 插件时注入该变量；
+/// 非宿主环境（本地调试等）可不调用，此时 `t_key()` 在握手前调用仍 panic。
+pub fn init() {
+    if let Ok(id) = std::env::var("ZEROLAUNCH_PLUGIN_ID") {
+        set_plugin_id(&id);
+    }
+}
+
 pub fn t_key(key: &str) -> String {
     let plugin_id = PLUGIN_ID
         .get()

@@ -26,7 +26,7 @@ plugin-template/
      - `QueryResponse::CustomPanel`：自定义面板响应，`data` 可承载**任意 JSON**，面板 UI 完全自定义（参考 Everything 插件按需渲染）；`keep_search_bar` 决定是否保留搜索栏。
    - `execute_action()`：动作执行（打开文件等经 `host()` 平台 API）。
 3. **`Configurable` trait**：`setting_schema()` 声明设置项（宿主设置页自动渲染），`apply_settings()` 应用返回值，`get_settings()` 提供当前值。
-4. **i18n**：所有面向用户的文本用 `t_key("key")` 生成命名空间键，`i18n/zh-Hans.json`、`en.json` 提供译文；面板侧用 `host.t(key)`（同键）。
+4. **i18n**：所有面向用户的文本用 `t_key("key")` 生成命名空间键，`i18n/zh-Hans.json`、`en.json` 提供译文；面板侧用 `host.t(key)`（同键）。插件 id 由宿主在握手时注入，`main()` 内组件构造、`metadata()` 等 `run()` 之前的位置使用 `t_key` 需先调用 `zerolaunch_plugin_sdk_rust::init()`（模板 `main()` 已含）。语言包键与 `t_key` 路径一致，可带点号（如 `"booster.name"` 对应 `t_key("booster.name")`，宿主加载时按点展开为嵌套目录，前端/`host.t()` 按同路径查找）；键值仅允许字符串或嵌套对象（数字/布尔会被宿主拒绝加载）。
 5. **自定义面板**（可选）：`manifest.toml` 的 `[ui] panelEntry` 指向 `ui/panel.mjs`，导出 `mount(rootEl, host)`；锚定宿主 Shadow DOM 内执行，样式直接用宿主 CSS 变量（`--bg-primary`、`--text-primary` 等）即可自动跟随宿主主题。
 
 ## 调试与验证

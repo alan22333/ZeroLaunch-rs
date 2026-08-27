@@ -115,5 +115,8 @@ impl Plugin for HelloWorldPlugin {
 }
 
 fn main() {
+    // 预置插件 id（宿主注入 ZEROLAUNCH_PLUGIN_ID），使组件构造阶段的
+    // t_key() 可用（组件元数据构造早于 run() 握手）。
+    zerolaunch_plugin_sdk_rust::init();
     run(HelloWorldPlugin::new())
 }
