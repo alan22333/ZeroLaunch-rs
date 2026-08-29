@@ -95,6 +95,44 @@ impl ShellExecutor for StubShellExecutor {
     }
 }
 
+// ===== Model Service =====
+
+pub struct StubModelService;
+
+#[async_trait::async_trait]
+impl crate::services::model::ModelService for StubModelService {
+    fn list_models(&self) -> Vec<crate::services::model::ModelInfo> {
+        Vec::new()
+    }
+
+    fn model_info(&self, _model_id: &str) -> Option<crate::services::model::ModelInfo> {
+        None
+    }
+
+    async fn chat(
+        &self,
+        _req: crate::services::model::ModelChatRequest,
+    ) -> Result<crate::services::model::ModelChatResponse, crate::services::model::ModelError> {
+        Err(crate::services::model::ModelError::NotSupported)
+    }
+
+    async fn stream_chat(
+        &self,
+        _req: crate::services::model::ModelChatRequest,
+        _tx: tokio::sync::mpsc::Sender<crate::services::model::ModelStreamChunk>,
+    ) -> Result<(), crate::services::model::ModelError> {
+        Err(crate::services::model::ModelError::NotSupported)
+    }
+
+    async fn embedding(
+        &self,
+        _req: crate::services::model::ModelEmbeddingRequest,
+    ) -> Result<crate::services::model::ModelEmbeddingResponse, crate::services::model::ModelError>
+    {
+        Err(crate::services::model::ModelError::NotSupported)
+    }
+}
+
 // ===== Clipboard Manager =====
 
 pub struct StubClipboardManager;

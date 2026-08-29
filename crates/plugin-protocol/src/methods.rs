@@ -89,6 +89,12 @@ pub mod host {
     pub const GET_LOCALE: &str = "host/i18n.get_locale";
     /// 拉取宿主当前主题。
     pub const GET_THEME: &str = "host/theme.get";
+    /// 拉取全网模型清单（聚合所有提供方）。
+    pub const MODEL_LIST: &str = "host/model.list";
+    /// 按 model_id 调用文本生成。
+    pub const MODEL_CHAT: &str = "host/model.chat";
+    /// 按 model_id 调用文本向量化。
+    pub const MODEL_EMBEDDING: &str = "host/model.embedding";
 }
 
 /// Notification-only method names (fire-and-forget, no response expected).

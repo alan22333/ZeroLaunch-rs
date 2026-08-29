@@ -81,6 +81,7 @@
     "sidebar": {
       "general": "General Settings",
       "appearance": "Appearance",
+      "models": "Model Management",
       "pipeline": "Search Pipeline",
       "plugins": "Plugins",
       "debug": "Debug Tools",
@@ -603,6 +604,128 @@
           "label": "Reset session on wake",
           "desc": "When enabled, each launcher show restores the initial search UI (parameter panel and inline parameter mode always reset). When disabled, plugin panel state persists across hide/show."
         }
+      }
+    },
+    "model-openai-config": {
+      "name": "OpenAI-compatible models",
+      "description": "Connect to cloud model services via an OpenAI-compatible API (OpenAI / DeepSeek, etc.)",
+      "groups": {
+        "connection": "Connection",
+        "models": "Models"
+      },
+      "fields": {
+        "base_url": {
+          "label": "API base URL",
+          "desc": "OpenAI-compatible endpoint, e.g. https://api.deepseek.com/v1"
+        },
+        "api_key": {
+          "label": "API Key",
+          "desc": "Key used for authentication"
+        },
+        "models": {
+          "label": "Model list",
+          "desc": "Declare available models and set per-model call parameters; use \"Fetch model list\" to pull models from the server"
+        }
+      },
+      "actions": {
+        "fetch_models": {
+          "label": "Fetch model list",
+          "description": "Fetch available models from the server and merge them into the list (the OpenAI protocol does not return model parameters; set them manually)"
+        }
+      }
+    },
+    "model-ollama-config": {
+      "name": "Ollama models",
+      "description": "Run models through a local Ollama server",
+      "groups": {
+        "connection": "Connection",
+        "models": "Models"
+      },
+      "fields": {
+        "base_url": {
+          "label": "Server URL",
+          "desc": "Ollama server address, e.g. http://localhost:11434"
+        },
+        "models": {
+          "label": "Model list",
+          "desc": "Declare available models and set per-model call parameters; empty lists all local models as chat models; use \"Fetch model list\" to pull local models"
+        }
+      },
+      "actions": {
+        "fetch_models": {
+          "label": "Fetch model list",
+          "description": "Fetch model metadata from the local Ollama server and merge it into the list"
+        }
+      }
+    },
+    "model-entry": {
+      "name": "Model entry",
+      "fields": {
+        "name": {
+          "label": "Model ID",
+          "desc": "Model name as recognized by the provider, e.g. gpt-4o-mini / qwen3:8b"
+        },
+        "kind": {
+          "label": "Role",
+          "desc": "chat: text generation; embedding: vectorization"
+        },
+        "temperature": {
+          "label": "Temperature",
+          "desc": "Sampling randomness, 0-2; defaults to 0.7"
+        },
+        "max_tokens": {
+          "label": "Max output tokens",
+          "desc": "Generation limit per response; defaults to 2048"
+        },
+        "top_p": {
+          "label": "Top-p",
+          "desc": "Sampling probability threshold, 0-1; defaults to 1.0"
+        },
+        "reasoning_effort": {
+          "label": "Reasoning effort",
+          "desc": "Reasoning level; defaults to none"
+        },
+        "context_length": {
+          "label": "Model maximum context length",
+          "desc": "Maximum input context length for chat or embedding, from provider metadata; read-only"
+        },
+        "dimensions": {
+          "label": "Output dimensions",
+          "desc": "Embedding output dimensions; defaults to 768 until provider metadata is available"
+        },
+        "similarity": {
+          "label": "Similarity metric",
+          "desc": "Metric used to compare embedding vectors"
+        },
+        "chat_capabilities": {
+          "label": "Chat capabilities",
+          "desc": "Select the request capabilities supported by this model; only checked capabilities are sent"
+        },
+        "embedding_capabilities": {
+          "label": "Embedding capabilities",
+          "desc": "Select the input and output capabilities supported by this model; only checked capabilities are used"
+        }
+      },
+      "kinds": {
+        "chat": "Chat",
+        "embedding": "Embedding"
+      },
+      "efforts": {
+        "none": "None",
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High"
+      },
+      "similarities": {
+        "cosine": "Cosine",
+        "dot_product": "Dot product",
+        "euclidean": "Euclidean"
+      },
+      "capabilities": {
+        "reasoning": "Reasoning",
+        "title": "Title input",
+        "task_type": "Task-type prompt",
+        "output_dimensions": "Output dimension truncation"
       }
     },
     "hotkey-config": {

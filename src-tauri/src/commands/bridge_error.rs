@@ -16,7 +16,7 @@ pub struct BridgeError {
     #[serde(rename = "message")]
     pub message: String,
     #[serde(rename = "details", default)]
-    pub details: Option<serde_json::Value>,
+    pub details: Box<Option<serde_json::Value>>,
     #[serde(rename = "componentId", default)]
     pub component_id: Option<String>,
     #[serde(rename = "traceId", serialize_with = "serialize_trace_id")]
@@ -99,7 +99,7 @@ impl From<ConfigError> for BridgeError {
         BridgeError {
             code,
             message: e.to_string(),
-            details: None,
+            details: Box::new(None),
             component_id: None,
             trace_id: String::new(),
         }
@@ -112,14 +112,14 @@ impl From<HostApiError> for BridgeError {
             HostApiError::PathTraversalRejected { .. } => BridgeError {
                 code: ErrorCode::ValidationFailed,
                 message: e.to_string(),
-                details: None,
+                details: Box::new(None),
                 component_id: None,
                 trace_id: String::new(),
             },
             _ => BridgeError {
                 code: ErrorCode::InternalError,
                 message: e.to_string(),
-                details: None,
+                details: Box::new(None),
                 component_id: None,
                 trace_id: String::new(),
             },
@@ -132,7 +132,7 @@ impl From<zerolaunch_plugin_api::PluginError> for BridgeError {
         BridgeError {
             code: ErrorCode::PluginError,
             message: e.to_string(),
-            details: None,
+            details: Box::new(None),
             component_id: None,
             trace_id: String::new(),
         }
@@ -167,14 +167,14 @@ impl From<PluginManagerError> for BridgeError {
             PluginManagerError::AlreadyInstalled(id) => BridgeError {
                 code: ErrorCode::AlreadyInstalled,
                 message: format!("插件已安装: {}", id),
-                details: None,
+                details: Box::new(None),
                 component_id: None,
                 trace_id: String::new(),
             },
             PluginManagerError::ComponentIdCollision(id) => BridgeError {
                 code: ErrorCode::ComponentIdCollision,
                 message: format!("组件 id 已被其他已注册组件占用: {}", id),
-                details: None,
+                details: Box::new(None),
                 component_id: Some(id),
                 trace_id: String::new(),
             },
@@ -188,7 +188,7 @@ impl BridgeError {
         BridgeError {
             code: ErrorCode::ComponentNotFound,
             message: format!("Component not found: {}", component_id),
-            details: None,
+            details: Box::new(None),
             component_id: Some(component_id.to_string()),
             trace_id: String::new(),
         }
@@ -198,7 +198,7 @@ impl BridgeError {
         BridgeError {
             code: ErrorCode::InternalError,
             message: message.into(),
-            details: None,
+            details: Box::new(None),
             component_id: None,
             trace_id: String::new(),
         }
@@ -208,7 +208,7 @@ impl BridgeError {
         BridgeError {
             code: ErrorCode::ValidationFailed,
             message: message.into(),
-            details: None,
+            details: Box::new(None),
             component_id: None,
             trace_id: String::new(),
         }

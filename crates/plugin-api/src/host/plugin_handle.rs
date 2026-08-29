@@ -9,6 +9,10 @@ use crate::services::icon::icon_cache::IconCacheService;
 use crate::services::icon::icon_extractor::IconExtractor;
 use crate::services::installation_monitor::types::InstallationCallback;
 use crate::services::installation_monitor::InstallationMonitor;
+use crate::services::model::{
+    ModelChatRequest, ModelChatResponse, ModelEmbeddingRequest, ModelEmbeddingResponse, ModelError,
+    ModelInfo, ModelService,
+};
 use crate::services::parameter::resolver::ParameterResolver;
 use crate::services::parameter::types::ParameterSnapshot;
 use crate::services::path::path_resolver::{KnownPath, PathResolver};
@@ -72,6 +76,8 @@ pub struct PluginHandle {
     theme_provider: Arc<dyn ThemeProvider>,
     /// 宿主当前主题配置模式（system/light/dark），由 HostApi 共享
     theme_mode: Arc<RwLock<String>>,
+    /// 模型服务，由 HostApi 注入
+    model_service: Arc<dyn ModelService>,
 }
 
 impl PluginHandle {
@@ -100,6 +106,7 @@ impl PluginHandle {
         installation_monitor: Arc<dyn InstallationMonitor>,
         focus_monitor: Arc<dyn FocusMonitor>,
         clipboard_manager: Arc<dyn ClipboardManager>,
+        model_service: Arc<dyn ModelService>,
     ) -> Self {
         Self {
             plugin_id,
@@ -124,6 +131,7 @@ impl PluginHandle {
             installation_monitor,
             focus_monitor,
             clipboard_manager,
+            model_service,
         }
     }
 
@@ -353,6 +361,26 @@ impl PluginHandle {
         self.theme_provider.current_system_theme()
     }
 
+    // ===== 模型服务 =====
+
+    /// 全网模型清单（聚合缓存，含所有已注册提供方）。
+    pub fn model_list(&self) -> Vec<ModelInfo> {
+        self.model_service.list_models()
+    }
+
+    /// 按 model_id 调用文本生成。
+    pub async fn model_chat(&self, req: ModelChatRequest) -> Result<ModelChatResponse, ModelError> {
+        self.model_service.chat(req).await
+    }
+
+    /// 按 model_id 调用文本向量化。
+    pub async fn model_embedding(
+        &self,
+        req: ModelEmbeddingRequest,
+    ) -> Result<ModelEmbeddingResponse, ModelError> {
+        self.model_service.embedding(req).await
+    }
+
     // ===== 参数解析服务 =====
 
     /// 解析参数模板
@@ -542,6 +570,68 @@ impl PluginHandle {
             })
     }
 
+    // ===== 本地缓存 =====
+
+    /// 写入插件本地缓存。
+    /// 参数：domain - 缓存域（按用途隔离，如 "model-embedding"）；key - 缓存键；data - 缓存字节内容。
+    /// 返回：成功返回 Ok(())。
+    /// 与 resource_* 的区别：缓存存放可再生的本地数据（如模型向量），
+    /// 不经过 StorageService，WebDAV 同步模式不会上传远端；
+    /// 路径为 <app_data>/plugin-cache/<plugin_id>/<domain>/<key>。
+    pub async fn cache_put(
+        &self,
+        domain: &str,
+        key: &str,
+        data: &[u8],
+    ) -> Result<(), HostApiError> {
+        let path = build_cache_path(&self.plugin_id, domain, key)?;
+        if let Some(parent) = std::path::Path::new(&path).parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                HostApiError::StorageOperationFailed {
+                    file: path.clone(),
+                    reason: format!("创建缓存目录失败: {}", e),
+                }
+            })?;
+        }
+        tokio::fs::write(&path, data)
+            .await
+            .map_err(|e| HostApiError::StorageOperationFailed {
+                file: path,
+                reason: format!("写入缓存文件失败: {}", e),
+            })?;
+        Ok(())
+    }
+
+    /// 读取插件本地缓存；缓存不存在时返回 Ok(None)。
+    pub async fn cache_get(
+        &self,
+        domain: &str,
+        key: &str,
+    ) -> Result<Option<Vec<u8>>, HostApiError> {
+        let path = build_cache_path(&self.plugin_id, domain, key)?;
+        match tokio::fs::read(&path).await {
+            Ok(data) => Ok(Some(data)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(HostApiError::StorageOperationFailed {
+                file: path,
+                reason: format!("读取缓存文件失败: {}", e),
+            }),
+        }
+    }
+
+    /// 删除插件本地缓存条目；缓存不存在时视为成功。
+    pub async fn cache_delete(&self, domain: &str, key: &str) -> Result<(), HostApiError> {
+        let path = build_cache_path(&self.plugin_id, domain, key)?;
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(HostApiError::StorageOperationFailed {
+                file: path,
+                reason: format!("删除缓存文件失败: {}", e),
+            }),
+        }
+    }
+
     // ===== 推送式回调注册 =====
 
     /// 为回调 ID 添加插件前缀，避免不同插件间的 ID 冲突。
@@ -648,6 +738,30 @@ fn normalize_path(path: &std::path::Path) -> std::path::PathBuf {
     result
 }
 
+/// 构建本地缓存文件路径：`plugin-cache/<plugin_id>/<domain>/<key>`。
+/// 校验 domain 与 key（拒绝空串、"."、".." 与路径穿越），策略同 build_resource_path。
+/// 缓存根目录为宿主 app data 下的 plugin-cache/，不经 StorageService。
+fn build_cache_path(plugin_id: &str, domain: &str, key: &str) -> Result<String, HostApiError> {
+    for segment in [domain, key] {
+        if segment.is_empty() || segment == "." || segment == ".." {
+            return Err(HostApiError::PathTraversalRejected {
+                path: segment.to_string(),
+            });
+        }
+    }
+    let base = std::path::PathBuf::from_iter(["plugin-cache", plugin_id, domain]);
+    let base_normalized = normalize_path(&base);
+    let mut path = base;
+    path.push(key);
+    let normalized = normalize_path(&path);
+    if normalized != base_normalized && !normalized.starts_with(&base_normalized) {
+        return Err(HostApiError::PathTraversalRejected {
+            path: key.to_string(),
+        });
+    }
+    Ok(path.to_string_lossy().replace('\\', "/"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -721,6 +835,32 @@ mod tests {
         let path = result.unwrap();
         assert!(path.starts_with("resources/test-plugin/"));
         assert!(path.ends_with("icon.png"));
+    }
+
+    #[test]
+    fn build_cache_path_accepts_valid_segments() {
+        let result = build_cache_path("test-plugin", "model-embedding", "ab/abc123.bin");
+        assert!(result.is_ok());
+        let path = result.unwrap();
+        assert!(path.starts_with("plugin-cache/test-plugin/model-embedding/"));
+        assert!(path.ends_with("abc123.bin"));
+    }
+
+    #[test]
+    fn build_cache_path_rejects_traversal() {
+        for (domain, key) in [
+            ("..", "a.bin"),
+            ("a", "../../x.bin"),
+            ("a", "../b/x.bin"),
+            ("a", ".."),
+            ("a", "."),
+            ("a", ""),
+        ] {
+            assert!(
+                build_cache_path("test-plugin", domain, key).is_err(),
+                "应拒绝 domain={domain:?} key={key:?}"
+            );
+        }
     }
 
     #[test]

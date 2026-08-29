@@ -29,7 +29,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use zerolaunch_plugin_api::config::{
     DataActionBinding, EffectActionBinding, FieldAction, FieldUiMetadata, PathMode, PrimitiveType,
-    SchemaKind, SchemaNode, SettingDefinition, WidgetHint,
+    SchemaKind, SchemaNode, SettingDefinition, VisibleWhen, WidgetHint,
 };
 
 /// Schema 构建器 —— 链式构建 `SettingDefinition`。
@@ -69,6 +69,25 @@ impl SchemaBuilder {
     /// 创建下拉选择字段（string + Select widget）。
     pub fn select(key: &str, label: &str, desc: &str) -> Self {
         Self::new(key, label, desc, SchemaNode::string(), WidgetHint::Select)
+    }
+    /// 创建多选复选框字段（字符串数组 + MultiSelect widget）。
+    /// 选项经 `options_with_labels` 写入数组元素的 enum 约束。
+    pub fn multi_select(key: &str, label: &str, desc: &str) -> Self {
+        Self::new(
+            key,
+            label,
+            desc,
+            SchemaNode {
+                kind: SchemaKind::Array {
+                    items: Box::new(SchemaNode::string()),
+                    item_widget: None,
+                    min_items: None,
+                    max_items: None,
+                },
+                default: None,
+            },
+            WidgetHint::MultiSelect,
+        )
     }
 
     /// 创建颜色选择字段（string + Color widget）。
@@ -165,6 +184,7 @@ impl SchemaBuilder {
                 order: 0,
                 visible: true,
                 read_only: false,
+                visible_when: None,
                 widget: Some(widget),
                 action: None,
                 detail_action: None,
@@ -195,6 +215,15 @@ impl SchemaBuilder {
     /// 设置字段可见性。
     pub fn visible(mut self, visible: bool) -> Self {
         self.ui.visible = visible;
+        self
+    }
+
+    /// 设置字段可见性条件：同级字段 field 的值等于 value 时才可见（与 visible 叠加）。
+    pub fn visible_when(mut self, field: &str, value: impl Into<Value>) -> Self {
+        self.ui.visible_when = Some(VisibleWhen {
+            field: field.to_string(),
+            value: value.into(),
+        });
         self
     }
 
@@ -304,6 +333,36 @@ impl SchemaBuilder {
                     enum_labels.push(label.to_string());
                 }
             }
+            SchemaKind::Array {
+                items: item_node, ..
+            } => match &mut item_node.kind {
+                SchemaKind::String {
+                    enum_values,
+                    enum_labels,
+                    ..
+                } => {
+                    enum_values.clear();
+                    enum_labels.clear();
+                    for (value, label) in items {
+                        enum_values.push(value.to_string());
+                        enum_labels.push(label.to_string());
+                    }
+                }
+                other => {
+                    debug_assert!(
+                        false,
+                        "SchemaBuilder::options_with_labels() 只能作用于字符串类型的数组元素。\
+                             字段 '{}' 的元素类型为 {other:?}",
+                        self.key
+                    );
+                    tracing::warn!(
+                        "SchemaBuilder::options_with_labels() 只能作用于字符串类型的数组元素。\
+                             字段 '{}' 的元素类型为 {other:?}",
+                        self.key
+                    );
+                    return self;
+                }
+            },
             other => {
                 debug_assert!(
                     false,

@@ -9,6 +9,7 @@ import type {
   FieldAction,
   DetailActionDef,
   SettingsContribution,
+  VisibleWhen,
 } from '../bridge/contract'
 
 // ── 字段配置（字段组件消费的完整类型） ──
@@ -25,6 +26,7 @@ export interface FieldConfig {
   visible: boolean
   required: boolean
   readOnly: boolean
+  visibleWhen: VisibleWhen | null
   schema: SchemaNode
   widget: WidgetHint | null
   action: FieldAction | null
@@ -40,6 +42,7 @@ export interface FieldDef {
   order: number
   visible: boolean
   required: boolean
+  visibleWhen: VisibleWhen | null
   schema: SchemaNode
   widget: WidgetHint | null
   editable: boolean
@@ -75,6 +78,7 @@ export function buildFieldConfigs(contribution: SettingsContribution): FieldConf
         visible: metadata.visible,
         required: false,
         readOnly: metadata.readOnly,
+        visibleWhen: metadata.visibleWhen ?? null,
         schema,
         widget: metadata.widget ?? null,
         action: metadata.action ?? null,
@@ -114,11 +118,10 @@ function stripTransientValue(
       delete result[key]
       continue
     }
-    if (key in result) result[key] = stripTransientValue(childSchema, result[key])
+    result[key] = stripTransientValue(childSchema, result[key])
   }
   return result
 }
-
 // ── 工具函数 ──
 
 /** 将单段 JSON Pointer（如 "/theme"、"/a~1b"）解码为字段 key。 */
@@ -177,7 +180,7 @@ export function widgetToArrayUiKind(widget: WidgetHint | null): ArrayUiKind {
 }
 
 /** 字段渲染器类别，供 DynamicFormField 统一分派。 */
-export type FieldRendererKind = 'text' | 'number' | 'boolean' | 'select' | 'color' | 'path' | 'image' | 'font' | 'hotkey' | 'array' | 'object'
+export type FieldRendererKind = 'text' | 'number' | 'boolean' | 'select' | 'multiselect' | 'color' | 'path' | 'image' | 'font' | 'hotkey' | 'array' | 'object'
 
 /** 字段 schema/widget 组合的基础分派结果。 */
 export interface FieldRenderInfo {
@@ -243,6 +246,12 @@ export function getFieldRenderInfo(field: FieldConfig): FieldRenderInfo {
         ? { kind: 'boolean', schemaType: schema.type, widgetKind, error: null }
         : { kind: null, schemaType: schema.type, widgetKind, error: 'unsupportedWidget' }
     case 'array':
+      if (widget?.kind === 'multiselect') {
+        const valid = schema.items.type === 'string' && schema.items.enum.length > 0
+        return valid
+          ? { kind: 'multiselect', schemaType: schema.type, widgetKind, error: null }
+          : { kind: null, schemaType: schema.type, widgetKind, error: 'unsupportedWidget' }
+      }
       return !widget || ARRAY_WIDGET_KINDS[widget.kind] === true
         ? { kind: 'array', schemaType: schema.type, widgetKind, error: null }
         : { kind: null, schemaType: schema.type, widgetKind, error: 'unsupportedWidget' }
@@ -457,6 +466,7 @@ export function getObjectFieldDefs(schema: SchemaNode, includeHidden = false): F
         order: ui.order,
         visible: ui.visible,
         required: schema.required?.includes(key) ?? false,
+        visibleWhen: ui.visibleWhen ?? null,
         schema: childSchema,
         widget: ui.widget ?? null,
         editable: !ui.readOnly,
@@ -480,9 +490,27 @@ export function canRemoveArrayItem(schema: SchemaNode, length: number): boolean 
 /** 生成数组项：优先使用后端明确 default，仅为 object/array 提供空结构容器。 */
 export function getDefaultArrayItem(schema: SchemaNode): unknown {
   if (schema.default != null) return schema.default
-  if (schema.type === 'object') return {}
+  // 对象条目：递归填充子字段的 schema 默认值（如 kind=chat），保证条件字段有判定基准。
+  if (schema.type === 'object') {
+    const item: Record<string, unknown> = {}
+    for (const [key, child] of Object.entries(schema.properties)) {
+      if (child.default != null) item[key] = child.default
+    }
+    return item
+  }
   if (schema.type === 'array') return []
   return undefined
+}
+
+/** 按当前作用域字段值过滤动态可见字段（visibleWhen 与同级值全等比较；无条件的保留）。 */
+export function filterVisibleByContext<T extends { key: string; visibleWhen: VisibleWhen | null }>(
+  fields: T[],
+  values: Record<string, unknown>,
+): T[] {
+  return fields.filter((field) => {
+    if (!field.visibleWhen) return true
+    return values[field.visibleWhen.field] === field.visibleWhen.value
+  })
 }
 
 /** 将嵌套字段定义转换为可复用的 FieldConfig。 */
@@ -496,6 +524,7 @@ export function fieldDefToConfig(fd: FieldDef, parentReadOnly = false): FieldCon
     visible: fd.visible,
     required: fd.required,
     readOnly: parentReadOnly || !fd.editable,
+    visibleWhen: fd.visibleWhen,
     schema: fd.schema,
     widget: fd.widget,
     action: fd.action,

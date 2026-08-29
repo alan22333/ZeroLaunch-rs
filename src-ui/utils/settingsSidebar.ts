@@ -27,7 +27,9 @@ export function buildSidebarItems(
       c.componentId !== 'candidate-registry' &&
       c.componentId !== 'bias-config' &&
       c.componentId !== 'appearance-config' &&
-      c.componentId !== 'icon-override-config',
+              c.componentId !== 'icon-override-config' &&
+        c.componentId !== 'model-openai-config' &&
+        c.componentId !== 'model-ollama-config',
   ).sort(sortByPriority)
   const appearance = components.filter(
     (c) => c.componentId === 'appearance-config' || c.componentId === 'icon-override-config',
@@ -36,11 +38,15 @@ export function buildSidebarItems(
     ['DataSource', 'KeywordOptimizer', 'KeywordInjector', 'SearchEngine', 'ScoreBooster', 'ActionExecutor', 'BiasRule'].includes(
       c.componentType,
     ),
+    ).sort(sortByPriority)
+  const models = components.filter(
+    (c) => c.componentId === 'model-openai-config' || c.componentId === 'model-ollama-config',
   ).sort(sortByPriority)
 
   const items: SidebarCategory[] = [
     { key: 'category_core', label: t('settings.sidebar.general'), icon: 'settings', type: 'tabs', components: core },
-    { key: 'category_appearance', label: t('settings.sidebar.appearance'), icon: 'palette', type: 'tabs', groupTabs: true, components: appearance },
+        { key: 'category_appearance', label: t('settings.sidebar.appearance'), icon: 'palette', type: 'tabs', groupTabs: true, components: appearance },
+    { key: 'category_models', label: t('settings.sidebar.models'), icon: 'cpu', type: 'tabs', components: models },
     { key: 'category_pipeline', label: t('settings.sidebar.pipeline'), icon: 'search', type: 'pipeline', components: pipeline },
     // 统一插件管理页（内置 + 第三方）：安装、运行状态与配置入口都在此页，不占侧边栏子项
     { key: 'category_plugins', label: t('settings.sidebar.plugins'), icon: 'extension', type: 'plugins-page' as const },

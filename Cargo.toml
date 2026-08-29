@@ -45,11 +45,15 @@ resvg = "0.47.0"
 usvg = "0.47.0"
 tiny-skia = "0.12.0"
 encoding_rs = "0.8.35"
-reqwest = { version = "0.13.4", features = ["json"] }
-reqwest_dav = "0.3.3"
+async-openai = { version = "0.41", default-features = false, features = ["chat-completion", "embedding", "model", "rustls"] }
+futures-util = "0.3"
+ollama-rs = { version = "0.3", features = ["stream"] }
+ reqwest = { version = "0.13.4", features = ["json"] }
+ reqwest_dav = "0.3.3"
 blake3 = "1.8.5"
 fnv = "1.0.7"
-lru = "0.18.0"
+ lru = "0.18.0"
+ sha2 = "0.10"
 uuid = { version = "1.23.4", features = ["v4"] }
 bincode-next = "3.1.1"
 kmeans_colors = "0.7.1"

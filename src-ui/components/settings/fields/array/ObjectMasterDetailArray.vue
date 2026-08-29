@@ -27,7 +27,7 @@
     </div>
     <div class="md-detail">
       <template v-if="selectedIndex < listValue.length">
-        <div v-for="fd in subFields" :key="fd.key" class="md-field">
+        <div v-for="fd in visibleSubFields" :key="fd.key" class="md-field">
           <DynamicFormField
             :field="fdToConfig(fd, field.readOnly)"
             :component-id="componentId"
@@ -55,6 +55,7 @@ import DetailPreviewPanel from './DetailPreviewPanel.vue'
 import {
   canAddArrayItem,
   canRemoveArrayItem,
+  filterVisibleByContext,
   getArrayItemSchema,
   getDefaultArrayItem,
   getObjectFieldDefs,
@@ -77,6 +78,20 @@ const itemSchema = computed(() => getArrayItemSchema(props.field.schema))
 const subFields = computed(() => itemSchema.value ? getObjectFieldDefs(itemSchema.value) : [])
 const fdToConfig = fieldDefToConfig
 const selectedIndex = ref(0)
+
+/** 当前选中条目的动态可见字段（visibleWhen 按条目自身值过滤）。 */
+const visibleSubFields = computed(() =>
+  filterVisibleByContext(subFields.value, itemValue(selectedIndex.value)),
+)
+
+/** 读取指定条目的值对象；缺失时返回空对象。 */
+function itemValue(idx: number): Record<string, unknown> {
+  const item = listValue.value[idx]
+  if (item && typeof item === 'object' && !Array.isArray(item)) {
+    return item as Record<string, unknown>
+  }
+  return {}
+}
 
 const selectedParamValue = computed<string | undefined>(() => {
   const da = props.field.detailAction

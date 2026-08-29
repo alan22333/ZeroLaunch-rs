@@ -56,6 +56,9 @@ pub enum WidgetHint {
     /// 下拉选择器。
     #[serde(rename = "select")]
     Select,
+    /// 多选复选框组（固定选项多选，值为字符串数组）。
+    #[serde(rename = "multiselect")]
+    MultiSelect,
     /// 路径选择器（文件/目录）。
     #[serde(rename = "path")]
     Path {
@@ -256,6 +259,20 @@ impl SchemaNode {
     }
 }
 
+/// 字段可见性条件 — 参照同级字段值动态显隐一个字段。
+///
+/// 语义：同一作用域（组件顶层，或对象条目内）中，字段 `field` 的当前值
+/// 与 `value` 全等时该字段可见。仅影响展示层渲染，不参与值校验与持久化。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VisibleWhen {
+    /// 同级字段的 key（snake_case，与属性 key 一致）。
+    #[serde(rename = "field")]
+    pub field: String,
+    /// 目标值（与目标字段的 JSON 值全等比较）。
+    #[serde(rename = "value")]
+    pub value: Value,
+}
+
 /// 字段 UI 元数据 — 描述前端如何渲染和展示一个配置字段。
 ///
 /// 通过 `pointer`（JSON Pointer 格式）关联到 `SettingsContribution.properties` 中的 schema 节点。
@@ -282,6 +299,9 @@ pub struct FieldUiMetadata {
     /// 是否只读。
     #[serde(rename = "readOnly", default)]
     pub read_only: bool,
+    /// 可见性条件：Some 时仅当同级字段值匹配时可见；与 visible 叠加（两者都满足才可见）。
+    #[serde(rename = "visibleWhen", default)]
+    pub visible_when: Option<VisibleWhen>,
     /// UI 控件提示。None 时前端根据 SchemaKind 选择默认控件。
     #[serde(rename = "widget", default)]
     pub widget: Option<WidgetHint>,
@@ -412,6 +432,7 @@ pub fn validate_setting_definitions(entries: &[SettingDefinition]) -> Result<(),
         return Err("too many top-level settings (max 128)".to_string());
     }
     let mut keys = HashSet::new();
+    let top_keys: HashSet<&str> = entries.iter().map(|e| e.key.as_str()).collect();
     for entry in entries {
         if entry.key.is_empty() || entry.key.len() > 128 {
             return Err("setting key length is invalid".to_string());
@@ -434,6 +455,7 @@ pub fn validate_setting_definitions(entries: &[SettingDefinition]) -> Result<(),
             ));
         }
         validate_ui(&entry.ui)?;
+        check_visible_when(&entry.ui, &top_keys)?;
         let mut node_count = 0usize;
         validate_schema_node(&entry.schema, 0, &mut node_count)?;
         if let Some(default) = &entry.schema.default {
@@ -617,7 +639,8 @@ fn validate_node(
             }
             if let Some(step) = multiple_of {
                 let quotient = number / step;
-                if (quotient - quotient.round()).abs() > 1e-9 {
+                // JSON 浮点值经 f32 往返后存在舍入误差，按 schema 精度容忍误差。
+                if (quotient - quotient.round()).abs() > 1e-6 {
                     return Err(format!("{} is not a multiple of {}", pointer, step));
                 }
             }
@@ -723,6 +746,22 @@ fn validate_ui(ui: &FieldUiMetadata) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// 校验 visible_when 引用的字段存在于同一作用域（同级字段集合）。
+fn check_visible_when(ui: &FieldUiMetadata, sibling_keys: &HashSet<&str>) -> Result<(), String> {
+    if let Some(cond) = &ui.visible_when {
+        if cond.field.is_empty() || cond.field.len() > 128 {
+            return Err(format!("invalid visibleWhen field at {}", ui.pointer));
+        }
+        if !sibling_keys.contains(cond.field.as_str()) {
+            return Err(format!(
+                "visibleWhen field '{}' does not exist in the same scope (pointer {})",
+                cond.field, ui.pointer
+            ));
+        }
+    }
+    Ok(())
+}
 /// 校验嵌套 object 的 UI 元数据是否与 properties 完整对应。
 fn validate_object_ui(
     properties: &BTreeMap<String, SchemaNode>,
@@ -732,8 +771,10 @@ fn validate_object_ui(
         return Err("object UI metadata must match properties".to_string());
     }
     let mut seen = HashSet::new();
+    let sibling_keys: HashSet<&str> = properties.keys().map(|k| k.as_str()).collect();
     for metadata in ui {
         validate_ui(metadata)?;
+        check_visible_when(metadata, &sibling_keys)?;
         if !seen.insert(metadata.pointer.clone()) {
             return Err(format!("duplicate object UI pointer: {}", metadata.pointer));
         }
@@ -822,6 +863,7 @@ mod tests {
                 order: 0,
                 visible: true,
                 read_only: false,
+                visible_when: None,
                 widget: None,
                 action: None,
                 detail_action: None,
@@ -846,6 +888,7 @@ mod tests {
                 order: 0,
                 visible: true,
                 read_only: false,
+                visible_when: None,
                 widget: None,
                 action: None,
                 detail_action: None,
@@ -876,6 +919,7 @@ mod tests {
                 order: 0,
                 visible: true,
                 read_only: false,
+                visible_when: None,
                 widget: None,
                 action: None,
                 detail_action: None,
@@ -895,6 +939,7 @@ mod tests {
             order: 0,
             visible: true,
             read_only: false,
+            visible_when: None,
             widget: None,
             action: None,
             detail_action: None,
@@ -902,6 +947,31 @@ mod tests {
     }
 
     /// 验证嵌套 object 按完整 schema 递归校验并接受合法默认值。
+    #[test]
+    fn validates_visible_when_sibling_scope() {
+        let kind = SettingDefinition {
+            key: "kind".into(),
+            schema: SchemaNode::string(),
+            ui: test_ui("/kind"),
+        };
+        let mut temp = SettingDefinition {
+            key: "temp".into(),
+            schema: SchemaNode::number(),
+            ui: test_ui("/temp"),
+        };
+        temp.ui.visible_when = Some(VisibleWhen {
+            field: "kind".into(),
+            value: Value::String("chat".into()),
+        });
+        assert!(SettingsContribution::from_entries(vec![kind.clone(), temp.clone()]).is_ok());
+
+        temp.ui.visible_when = Some(VisibleWhen {
+            field: "missing".into(),
+            value: Value::String("chat".into()),
+        });
+        assert!(SettingsContribution::from_entries(vec![kind, temp]).is_err());
+    }
+
     #[test]
     fn validates_nested_object_schema() {
         let mut properties = BTreeMap::new();

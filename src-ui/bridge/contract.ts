@@ -177,6 +177,7 @@ export type WidgetHint =
   | { kind: 'number' }
   | { kind: 'toggle' }
   | { kind: 'select' }
+  | { kind: 'multiselect' }
   | { kind: 'path'; mode: 'file' | 'directory' }
   | { kind: 'color' }
   | { kind: 'image'; accept: string[]; maxSize: number | null }
@@ -228,6 +229,12 @@ export interface DetailActionDef {
 
 // ── 字段 UI 元数据 ──
 
+/** 字段可见性条件 — 与同级字段 JSON 值全等比较，命中才显示该字段（仅展示层）。 */
+export interface VisibleWhen {
+  field: string
+  value: unknown
+}
+
 export interface FieldUiMetadata {
   pointer: string
   label: string
@@ -236,6 +243,7 @@ export interface FieldUiMetadata {
   order: number
   visible: boolean
   readOnly: boolean
+  visibleWhen: VisibleWhen | null
   widget: WidgetHint | null
   action: FieldAction | null
   detailAction: DetailActionDef | null

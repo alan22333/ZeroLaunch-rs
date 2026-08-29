@@ -218,6 +218,30 @@ impl HostCallHandler for TauriHostCallHandler {
                 };
                 Ok(serde_json::json!(theme))
             }
+            // 全网模型清单（聚合缓存）。
+            host::MODEL_LIST => Ok(serde_json::to_value(handle.model_list()).unwrap_or_default()),
+            // 按 model_id 调用文本生成。
+            host::MODEL_CHAT => {
+                let req: zerolaunch_plugin_api::services::model::ModelChatRequest =
+                    from_value(params)
+                        .map_err(|e| JsonRpcError::new(codes::INVALID_PARAMS, e.to_string()))?;
+                let resp = handle
+                    .model_chat(req)
+                    .await
+                    .map_err(|e| JsonRpcError::new(codes::PLUGIN_ERROR, e.to_string()))?;
+                Ok(serde_json::to_value(resp).unwrap_or_default())
+            }
+            // 按 model_id 调用文本向量化。
+            host::MODEL_EMBEDDING => {
+                let req: zerolaunch_plugin_api::services::model::ModelEmbeddingRequest =
+                    from_value(params)
+                        .map_err(|e| JsonRpcError::new(codes::INVALID_PARAMS, e.to_string()))?;
+                let resp = handle
+                    .model_embedding(req)
+                    .await
+                    .map_err(|e| JsonRpcError::new(codes::PLUGIN_ERROR, e.to_string()))?;
+                Ok(serde_json::to_value(resp).unwrap_or_default())
+            }
             _ => Err(JsonRpcError::new(
                 codes::METHOD_NOT_FOUND,
                 format!("host method not found: {}", method),

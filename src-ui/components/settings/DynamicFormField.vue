@@ -35,6 +35,7 @@ import NumberField from './fields/NumberField.vue'
 import BooleanField from './fields/BooleanField.vue'
 import SelectField from './fields/SelectField.vue'
 import ColorField from './fields/ColorField.vue'
+import MultiSelectField from './fields/MultiSelectField.vue'
 import PathField from './fields/PathField.vue'
 import ArrayField from './fields/ArrayField.vue'
 import ImageField from './fields/ImageField.vue'
@@ -80,6 +81,7 @@ const fieldComponent = computed<Component | null>(() => {
     case 'boolean': return BooleanField
     case 'select': return SelectField
     case 'color': return ColorField
+    case 'multiselect': return MultiSelectField
     case 'path': return PathField
     case 'image': return ImageField
     case 'font': return FontField

@@ -14,5 +14,5 @@ pub use configurable::Configurable;
 pub use error::ConfigError;
 pub use setting_def::{
     CommitPolicy, FieldUiMetadata, PathMode, PrimitiveType, SchemaKind, SchemaNode,
-    SettingDefinition, SettingsContribution, WidgetHint, SETTINGS_SCHEMA_VERSION,
+    SettingDefinition, SettingsContribution, VisibleWhen, WidgetHint, SETTINGS_SCHEMA_VERSION,
 };

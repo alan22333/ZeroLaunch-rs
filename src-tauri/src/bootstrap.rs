@@ -138,6 +138,9 @@ pub(crate) async fn init_app_state(
     let app_handle_for_set_pos = app_handle.clone();
     let app_handle_for_third_party_plugins = app_handle.clone();
 
+    // ModelManager 由 AppState 持有，HostApi 与 core handle 共享同一实例。
+    let model_manager = state.get_model_manager();
+
     let host_api = Arc::new(
         crate::build_windows_host_api_builder(
             icon_cache_dir,
@@ -184,6 +187,7 @@ pub(crate) async fn init_app_state(
                 .map(|w| w.is_visible().unwrap_or(false))
                 .unwrap_or(false)
         })
+        .model_service(model_manager.clone())
         .build()
         .expect("Failed to build HostApi"),
     );
@@ -201,6 +205,12 @@ pub(crate) async fn init_app_state(
     let core_handle = host_api.register("core", Default::default());
     state.set_core_handle(core_handle.clone());
     info!("Core PluginHandle 注册完成");
+
+    // embedding 缓存经 core PluginHandle 的本地缓存空间挂载：
+    // 路径 <app_data>/plugin-cache/core/model-embedding/，不经 StorageService，
+    // WebDAV 同步模式不会上传远端。
+    let embedding_cache = Arc::new(crate::core::model::EmbeddingCache::new(core_handle.clone()));
+    model_manager.set_cache(embedding_cache);
 
     // 注册安装监控刷新回调：开始菜单变化（平台层去抖合并后）自动刷新候选项缓存。
     // 必须在 init_plugin_system 加载持久化配置（可能触发监控启动）之前注册，
@@ -384,12 +394,17 @@ pub(crate) async fn init_plugin_system(state: &Arc<AppState>) -> HashSet<String>
     let cm_for_events = config_manager.clone();
     let host_api_for_events = state.get_host_api();
     let state_for_events = state.clone();
+    let model_manager_for_events = state.get_model_manager();
     let mut event_receiver = config_manager.event_sender().subscribe();
     tauri::async_runtime::spawn(async move {
         loop {
             match event_receiver.recv().await {
                 Ok(event) => {
                     event_router.handle_config_event(&event).await;
+                    // 内置模型配置变更时重建提供方并刷新模型清单
+                    model_manager_for_events
+                        .handle_config_event(&cm_for_events, &event)
+                        .await;
                     // 将 SettingsChanged 事件桥接到 Tauri 前端，实现跨窗口同步。
                     // 注：Registered/Unregistered 仅启动时触发（前端窗口未创建），
                     // EnabledChanged 暂无前端消费者，故暂不转发。
@@ -657,6 +672,11 @@ pub(crate) async fn init_plugin_system(state: &Arc<AppState>) -> HashSet<String>
 
     info!("根据已注册且启用的搜索引擎与增强器重建搜索管道...");
     session_dispatcher.rebuild_search_pipeline();
+
+    // 内置模型提供方按当前配置构建并聚合模型清单（配置组件已在 Phase A 注册）
+    let model_manager = state.get_model_manager();
+    model_manager.register_builtin_providers(&config_manager);
+    model_manager.refresh_models().await;
 
     info!("更新 SessionDispatcher 状态...");
     session_dispatcher

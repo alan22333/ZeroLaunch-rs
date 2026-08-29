@@ -11,6 +11,7 @@ use zerolaunch_plugin_api::services::hotkey::HotkeyManager;
 use zerolaunch_plugin_api::services::icon::icon_cache::IconCacheService;
 use zerolaunch_plugin_api::services::icon::icon_extractor::IconExtractor;
 use zerolaunch_plugin_api::services::installation_monitor::InstallationMonitor;
+use zerolaunch_plugin_api::services::model::ModelService;
 use zerolaunch_plugin_api::services::parameter::provider::SystemParameterProvider;
 use zerolaunch_plugin_api::services::parameter::resolver::ParameterResolver;
 use zerolaunch_plugin_api::services::path::path_resolver::PathResolver;
@@ -86,6 +87,8 @@ pub struct HostApi {
     app_resource: Arc<AppResourceService>,
     /// 主题提供器（平台实现）
     theme_provider: Arc<dyn ThemeProvider>,
+    /// 模型服务（聚合所有模型提供方并按 model_id 路由）
+    model_service: Arc<dyn ModelService>,
     /// 宿主当前主题配置模式（system/light/dark），共享给所有注册句柄
     theme_mode: Arc<RwLock<String>>,
     /// 通知回调（宿主级）
@@ -134,6 +137,7 @@ impl HostApi {
             self.installation_monitor.clone(),
             self.focus_monitor.clone(),
             self.clipboard_manager.clone(),
+            self.model_service.clone(),
         ));
         self.handles.insert(plugin_id.to_string(), handle.clone());
         handle
@@ -411,6 +415,7 @@ pub struct HostApiBuilder {
     app_resource: Option<Arc<AppResourceService>>,
     focus_monitor: Option<Arc<dyn FocusMonitor>>,
     theme_provider: Option<Arc<dyn ThemeProvider>>,
+    model_service: Option<Arc<dyn ModelService>>,
     clipboard_manager: Option<Arc<dyn ClipboardManager>>,
     notify_callback: Option<Arc<dyn Fn(String, String) + Send + Sync + 'static>>,
     hide_window_callback: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
@@ -448,6 +453,7 @@ impl HostApiBuilder {
             app_resource: None,
             focus_monitor: None,
             theme_provider: None,
+            model_service: None,
             clipboard_manager: None,
             notify_callback: None,
             hide_window_callback: None,
@@ -620,6 +626,14 @@ impl HostApiBuilder {
         self
     }
 
+    /// 设置模型服务。
+    /// 参数：model_service - 模型服务实例。
+    /// 返回：Self（支持链式调用）。
+    pub fn model_service(mut self, model_service: Arc<dyn ModelService>) -> Self {
+        self.model_service = Some(model_service);
+        self
+    }
+
     /// 设置剪贴板管理器。
     /// 参数：clipboard_manager - 剪贴板管理器实例。
     /// 返回：Self（支持链式调用）。
@@ -768,6 +782,9 @@ impl HostApiBuilder {
             clipboard_manager: self
                 .clipboard_manager
                 .ok_or(HostApiBuildError::MissingComponent("clipboard_manager"))?,
+            model_service: self
+                .model_service
+                .ok_or(HostApiBuildError::MissingComponent("model_service"))?,
             notify_callback: RwLock::new(
                 self.notify_callback
                     .ok_or(HostApiBuildError::MissingComponent("notify_callback"))?,

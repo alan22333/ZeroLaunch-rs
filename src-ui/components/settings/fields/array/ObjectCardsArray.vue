@@ -11,7 +11,7 @@
           {{ $t('common.delete') }}
         </n-button>
       </div>
-      <div v-for="fd in subFields" :key="fd.key" class="object-card-field">
+      <div v-for="fd in visibleFieldsFor(idx)" :key="fd.key" class="object-card-field">
         <DynamicFormField
           :field="fdToConfig(fd, field.readOnly)"
           :component-id="componentId"
@@ -36,12 +36,13 @@ import DynamicFormField from '../../DynamicFormField.vue'
 import {
   canAddArrayItem,
   canRemoveArrayItem,
+  filterVisibleByContext,
   getArrayItemSchema,
   getDefaultArrayItem,
   getObjectFieldDefs,
   fieldDefToConfig,
 } from '../../../../utils/schemaTypes'
-import type { FieldConfig } from '../../../../utils/schemaTypes'
+import type { FieldConfig, FieldDef } from '../../../../utils/schemaTypes'
 
 const props = defineProps<{
   field: FieldConfig
@@ -57,6 +58,20 @@ const itemSchema = computed(() => getArrayItemSchema(props.field.schema))
 
 const subFields = computed(() => itemSchema.value ? getObjectFieldDefs(itemSchema.value) : [])
 const fdToConfig = fieldDefToConfig
+
+/** 指定条目的动态可见字段（visibleWhen 按条目自身值过滤）。 */
+function visibleFieldsFor(idx: number): FieldDef[] {
+  return filterVisibleByContext(subFields.value, getRecord(idx))
+}
+
+/** 读取对象数组中的条目值对象；缺失时返回空对象。 */
+function getRecord(idx: number): Record<string, unknown> {
+  const item = listValue.value[idx]
+  if (item && typeof item === 'object' && !Array.isArray(item)) {
+    return item as Record<string, unknown>
+  }
+  return {}
+}
 
 const listValue = computed<unknown[]>(() => {
   if (Array.isArray(props.modelValue)) return props.modelValue as unknown[]

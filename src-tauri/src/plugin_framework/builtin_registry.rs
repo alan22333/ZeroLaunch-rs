@@ -340,6 +340,7 @@ mod tests {
             .app_resource(Arc::new(AppResourceService::new("mock_icons".to_string())))
             .focus_monitor(Arc::new(StubFocusMonitor))
             .clipboard_manager(Arc::new(StubClipboardManager))
+            .model_service(Arc::new(StubModelService))
             .notify_callback(|_, _| {})
             .theme_provider(Arc::new(StubThemeProvider))
             .hide_window_callback(|| {})

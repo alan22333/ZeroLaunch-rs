@@ -49,3 +49,5 @@ code-review*.md
 
 tmp_edge_profile
 tmp_resultlist_repro.html
+
+.commandcode/

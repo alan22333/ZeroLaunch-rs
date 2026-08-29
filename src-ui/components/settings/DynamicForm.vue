@@ -91,6 +91,7 @@ import {
   stripTransientSettings,
   SUPPORTED_SCHEMA_VERSION,
   validateSettings,
+  filterVisibleByContext,
 } from '../../utils/schemaTypes'
 import type { ComponentSchema } from '../../bridge/contract'
 import type { FieldConfig } from '../../utils/schemaTypes'
@@ -142,8 +143,13 @@ const fieldConfigResult = computed<{ fields: FieldConfig[]; error: string | null
 const fields = computed(() => fieldConfigResult.value.fields)
 const schemaError = computed(() => fieldConfigResult.value.error)
 
+/** 按当前表单值过滤动态可见字段（visibleWhen 条件随输入即时生效）。 */
+const visibleFields = computed(() =>
+  filterVisibleByContext(fields.value, localValues.value),
+)
+
 /** 是否存在可见的可配置字段；无字段时展示空态提示并隐藏操作按钮。 */
-const hasFields = computed(() => fields.value.length > 0)
+const hasFields = computed(() => visibleFields.value.length > 0)
 
 /** 记录无法构建字段配置的 schema 错误。 */
 watch(schemaError, (error) => {
@@ -153,7 +159,7 @@ watch(schemaError, (error) => {
 /** 按 group 分组 */
 const groupedFields = computed(() => {
   const groups = new Map<string, FieldConfig[]>()
-  for (const field of fields.value) {
+  for (const field of visibleFields.value) {
     const g = field.group || ''
     if (!groups.has(g)) groups.set(g, [])
     groups.get(g)!.push(field)

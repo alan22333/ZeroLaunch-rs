@@ -12,6 +12,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
+use zerolaunch_plugin_api::services::model::{
+    ModelChatRequest, ModelChatResponse, ModelEmbeddingRequest, ModelEmbeddingResponse, ModelInfo,
+};
 use zerolaunch_plugin_protocol::codec::encode_frame;
 
 use base64::Engine as _;
@@ -181,6 +184,31 @@ impl HostProxy {
             .as_str()
             .map(str::to_string)
             .ok_or_else(|| "host theme response is not a string".to_string())
+    }
+
+    /// 全网模型清单（聚合所有提供方）。
+    pub async fn model_list(&self) -> Result<Vec<ModelInfo>, String> {
+        let result = self
+            .send_request("host/model.list", serde_json::Value::Null)
+            .await?;
+        serde_json::from_value(result).map_err(|e| e.to_string())
+    }
+
+    /// 按 model_id 调用文本生成。
+    pub async fn model_chat(&self, req: ModelChatRequest) -> Result<ModelChatResponse, String> {
+        let params = serde_json::to_value(req).map_err(|e| e.to_string())?;
+        let result = self.send_request("host/model.chat", params).await?;
+        serde_json::from_value(result).map_err(|e| e.to_string())
+    }
+
+    /// 按 model_id 调用文本向量化。
+    pub async fn model_embedding(
+        &self,
+        req: ModelEmbeddingRequest,
+    ) -> Result<ModelEmbeddingResponse, String> {
+        let params = serde_json::to_value(req).map_err(|e| e.to_string())?;
+        let result = self.send_request("host/model.embedding", params).await?;
+        serde_json::from_value(result).map_err(|e| e.to_string())
     }
 
     pub async fn enumerate_apps(&self) -> Result<serde_json::Value, String> {

@@ -264,6 +264,8 @@ mod tests {
     ///
     /// 依赖 bun 与 tests/fixtures/webdav_server.ts；整体 30 秒超时保护，
     /// 服务器进程通过 shutdown 端点优雅退出（兜底 kill 进程树）。
+    /// 默认忽略：需要本地起 WebDAV 测试服务器，且走代理时可能超时。
+    #[ignore]
     #[tokio::test]
     async fn webdav_storage_full_roundtrip() {
         let mut child = start_server();

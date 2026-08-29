@@ -81,8 +81,9 @@
     "sidebar": {
       "general": "常规设置",
       "appearance": "外观设置",
+      "models": "模型管理",
+      "plugins": "插件",
       "pipeline": "搜索管道",
-      "plugins": "插件管理",
       "debug": "调试工具",
       "about": "关于"
     },
@@ -603,6 +604,128 @@
           "label": "唤醒时重置会话",
           "desc": "启用后，每次显示启动器时恢复初始搜索界面（参数面板和行内参数模式始终恢复）。关闭后，插件面板状态可在隐藏/显示间保持。"
         }
+      }
+    },
+    "model-openai-config": {
+      "name": "OpenAI 兼容模型",
+      "description": "通过 OpenAI 兼容 API 接入云端模型服务（OpenAI / DeepSeek 等）",
+      "groups": {
+        "connection": "连接",
+        "models": "模型"
+      },
+      "fields": {
+        "base_url": {
+          "label": "API 地址",
+          "desc": "OpenAI 兼容端点，如 https://api.deepseek.com/v1"
+        },
+        "api_key": {
+          "label": "API Key",
+          "desc": "用于认证的密钥"
+        },
+        "models": {
+          "label": "模型清单",
+          "desc": "声明可用的模型并设置各自的调用参数；可点击“获取模型列表”拉取服务端模型"
+        }
+      },
+      "actions": {
+        "fetch_models": {
+          "label": "获取模型列表",
+          "description": "从服务端拉取可用模型并合并到模型清单（OpenAI 协议不返回模型参数，需手动设置）"
+        }
+      }
+    },
+    "model-ollama-config": {
+      "name": "Ollama 模型",
+      "description": "通过本地 Ollama 服务运行模型",
+      "groups": {
+        "connection": "连接",
+        "models": "模型"
+      },
+      "fields": {
+        "base_url": {
+          "label": "服务地址",
+          "desc": "Ollama 服务地址，如 http://localhost:11434"
+        },
+        "models": {
+          "label": "模型清单",
+          "desc": "声明可用的模型并设置各自的调用参数；留空表示全部本地模型按文本模型列出；可点击“获取模型列表”拉取本地模型"
+        }
+      },
+      "actions": {
+        "fetch_models": {
+          "label": "获取模型列表",
+          "description": "从本地 Ollama 服务拉取模型元数据并合并到模型清单"
+        }
+      }
+    },
+    "model-entry": {
+      "name": "模型条目",
+      "fields": {
+        "name": {
+          "label": "模型 ID",
+          "desc": "提供方识别的模型名，如 gpt-4o-mini / qwen3:8b"
+        },
+        "kind": {
+          "label": "角色",
+          "desc": "chat：文本生成；embedding：向量化"
+        },
+        "temperature": {
+          "label": "温度 (temperature)",
+          "desc": "采样随机性，0-2；默认值为 0.7"
+        },
+        "max_tokens": {
+          "label": "最大输出 token",
+          "desc": "单次生成上限；默认值为 2048"
+        },
+        "top_p": {
+          "label": "核采样 (top_p)",
+          "desc": "采样概率阈值，0-1；默认值为 1.0"
+        },
+        "reasoning_effort": {
+          "label": "思考档位",
+          "desc": "思考档位；默认值为 none"
+        },
+        "context_length": {
+          "label": "模型最大上下文长度",
+          "desc": "chat 或 embedding 可接受的最大输入上下文长度，来自提供方元数据，只读"
+        },
+        "dimensions": {
+          "label": "输出维度 (dimensions)",
+          "desc": "向量输出维度；provider 元数据可用前默认值为 768"
+        },
+        "similarity": {
+          "label": "相似度计算方式",
+          "desc": "用于比较 embedding 向量的计算方式"
+        },
+        "chat_capabilities": {
+          "label": "Chat 能力",
+          "desc": "选择该模型支持的请求能力；只有勾选的能力会被发送"
+        },
+        "embedding_capabilities": {
+          "label": "Embedding 能力",
+          "desc": "选择该模型支持的输入与输出能力；只有勾选的能力会被使用"
+        }
+      },
+      "kinds": {
+        "chat": "文本生成",
+        "embedding": "向量化"
+      },
+      "efforts": {
+        "none": "关闭",
+        "low": "低",
+        "medium": "中",
+        "high": "高"
+      },
+      "similarities": {
+        "cosine": "余弦相似度",
+        "dot_product": "点积",
+        "euclidean": "欧氏距离"
+      },
+      "capabilities": {
+        "reasoning": "深度思考 (reasoning)",
+        "title": "标题输入 (title)",
+        "task_type": "任务类型提示 (taskType)",
+        "output_dimensions": "输出维度裁剪 (outputDimensions)"
       }
     },
     "hotkey-config": {
