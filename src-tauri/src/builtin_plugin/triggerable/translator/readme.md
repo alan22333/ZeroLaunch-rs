@@ -11,12 +11,10 @@ translator/
 ├── mod.rs
 ├── plugin.rs           # TranslatorPlugin：Configurable + Plugin + inventory
 ├── provider.rs         # TranslationProvider / LanguageSupport / 统一结果类型
-├── query_parser.rs     # 查询解析（语言码目录随启用引擎变化）
-├── registry.rs         # ProviderRegistry：并行、聚合、语言并集
+├── query_parser.rs     # 查询解析（语言码目录随宿主模型语言能力变化）
 ├── providers/
 │   ├── mod.rs
-│   ├── openai_compatible.rs   # LLM翻译：OpenAI 兼容 chat/completions
-│   └── mock.rs                # 模拟翻译：模拟示例
+│   └── host_model.rs   # 宿主模型翻译：经 PluginHandle 调宿主模型服务
 └── readme.md
 ```
 
@@ -31,7 +29,7 @@ translator/
 | `inventory::submit!` | `component_id: "translator"`，与 metadata id 一致 |
 | 触发词注册期固定 | `fy` / `tr` / `翻译` |
 | CustomPanel | `panel_type: "translator"` |
-| 平台能力 | 剪贴板经 `PluginHandle`（`set_clipboard_text`）；LLM HTTP 调用为插件自身职责（直连）；勿反向依赖 `plugin_framework` |
+| 平台能力 | 剪贴板与宿主模型均经 `PluginHandle`（`set_clipboard_text` / `model_chat` / `model_list`）；勿反向依赖 `plugin_framework` |
 
 ## 统一结果契约
 
@@ -69,17 +67,17 @@ pub struct TranslationResult {
 ```
 fy …
   → SessionRouter → TranslatorPlugin::query
-  → enabled_providers 的 language_support 并集 → LangCatalog
+  → HostModelProvider 的 language_support → LangCatalog
   → parse_search_term
   → on_enter 且同文首次：status=ready（不调引擎）
-  → 否则 ProviderRegistry::translate_all
+  → 否则 host_provider.translate（外层 timeout 超时保护）
   → CustomPanel { panel_type: "translator", … }
 ```
 
-- **启用引擎**：勾选清单 + 拖拽调序（靠前优先）；`openai-compatible`（OpenAI 兼容，勾选后展开 LLM 配置）与 `mock`（模拟示例：镜像其它引擎成功结果，否则固定占位）。
+- **翻译模型**：设置页从宿主模型服务拉取 chat 模型清单（config action `list_models`），选中后存 `model_id`；未选模型时中文报错且不发请求。
 - **翻译触发**：`live` 输入即译；`on_enter` 同文第二次 query 才真正翻译（插件内部门控，不改框架 `Query`）。
 - **默认目标语**：无语言码时用设置中的 `default_target`；与源语相同时回退到另一常用语。
-- **语言能力**：各 Provider 的 `language_support()` 须反映当前配置；解析与校验基于启用引擎并集。
+- **语言能力**：`HostModelProvider::language_support()` 提供静态双语列表；解析与校验基于该列表。
 
 ## 如何新增 Provider
 
@@ -114,13 +112,13 @@ impl TranslationProvider for FooProvider {
 }
 ```
 
-- `id()` kebab-case，与 `enabled_providers` 的 value 一致。
+- `id()` kebab-case，与设置中持久化的引擎标识一致。
 - 用户可见错误用**中文**；直接填契约字段，无需 JSON 解析。
 - 在 `providers/mod.rs` 中 `mod` + `pub use`。
 
 ### 2. 注册
 
-在 `TranslatorPlugin::new()` 加入 `ProviderRegistry::new(vec![...])`。有运行时配置时用 `Arc<RwLock<...>>` 注入（参考内置 `OpenAiCompatibleProvider` 的 `LlmConfig`）。
+在 `TranslatorPlugin::new()` 构造 Provider 并保存 `Arc`（供注入运行时配置）。需要宿主能力（模型/剪贴板）时经 `PluginHandle` 访问：`init()` 时把 handle 注入 Provider（参考内置 `HostModelProvider` 的 `set_handle`）。
 
 ### 3. 设置
 
@@ -135,21 +133,21 @@ impl TranslationProvider for FooProvider {
 cargo test -p zerolaunch-rs translator
 ```
 
-覆盖：缺凭证/非法参数、语言并集、不支持语言对早退、并行聚合。
+覆盖：未选模型/句柄缺失、模型输出脏格式容错解析、语言能力、不支持语言对早退、超时。
 
-## 内置示例：`openai-compatible`
+## 内置示例：`host-model`
 
-当前默认启用的一个 Provider，实现上用 OpenAI 兼容 `POST {base_url}/chat/completions`（`stream: false`），把模型输出解析进统一契约。系统提示词在代码常量里，**不**暴露给用户。
+当前默认启用的一个 Provider，实现上经 `PluginHandle.model_chat` 调用宿主模型服务（宿主模型管理配置的 OpenAI 兼容 / Ollama 模型），把模型输出解析进统一契约。系统提示词与脏输出容错解析（markdown 围栏、`<think>` 块、纯文本回退）在 `providers/host_model.rs` 里，**不**暴露给用户。
 
-配置键：`llm_base_url` / `llm_api_key` / `llm_model`（及设置页厂商预设，仅便于填 URL）。缺配置时中文报错且不发请求。
+配置键：`model_id`（宿主模型清单中的全局 id，如 `openai/gpt-4o-mini`）；设置页经插件 `config action: list_models` 拉取宿主模型列表（仅 chat 模型），未选模型时中文报错且不发请求。
 
-扩展新引擎时**不必**复制这套 HTTP/提示词逻辑；按上一节直接填 `TranslationResult` 即可。
+扩展新引擎时**不必**复制这套提示词/解析逻辑；按上一节直接填 `TranslationResult` 即可。
 
 ## UI 约定
 
-**设置页**（`TranslatorSettings.vue`）：无「启用」项（用宿主统一开关）；分组为基础 / 引擎 / LLM 服务（LLM 分组是内置引擎的专属配置，其他引擎按同样方式加自己的分组）。
+**设置页**（`TranslatorSettings.vue`）：无「启用」项（用宿主统一开关）；基础设置（触发/目标语/超时/防抖）+ 引擎分组（翻译模型下拉）。
 
-**结果面板**（`TranslationPanel.vue`）：元信息 → 主译 → 音标 → 计算机释义 → 更多释义常显 → 其他引擎折叠 → 复制主译。
+**结果面板**（`TranslationPanel.vue`）：元信息 → 主译 → 音标 → 计算机释义 → 更多释义常显 → 复制主译。
 
 ## 查询语法
 
@@ -167,5 +165,5 @@ cargo test -p zerolaunch-rs translator
 - [ ] 文件在 `providers/`，未进框架 crate  
 - [ ] 实现 `id` / `name` / `language_support` / `translate`  
 - [ ] 成功结果 `normalize_senses()`；错误中文  
-- [ ] 已加入 `ProviderRegistry`；设置与前端选项已更新  
+- [ ] 已构造 Provider 并注入运行时配置；设置与前端选项已更新  
 - [ ] 密钥不明文打日志；`cargo test -p zerolaunch-rs translator` 通过  

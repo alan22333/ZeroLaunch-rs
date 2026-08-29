@@ -3,26 +3,52 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use parking_lot::RwLock;
 use serde::Deserialize;
-use tracing::{error, warn};
+use tracing::warn;
+use zerolaunch_plugin_api::host::PluginHandle;
+use zerolaunch_plugin_api::services::model::{
+    ModelChatMessage, ModelChatRequest, ModelChatRole, ModelError,
+};
 
 use super::super::provider::{
     LanguageSupport, SenseEntry, TranslateRequest, TranslationProvider, TranslationResult,
 };
 
-pub const PROVIDER_ID: &str = "openai-compatible";
+pub const PROVIDER_ID: &str = "host-model";
 
-/// OpenAI 兼容 LLM 引擎的连接配置（Base URL / API Key / Model）。
+/// 宿主模型 LLM 翻译引擎 Provider。
 ///
-/// 仅 TranslatorPlugin 内部使用，不跨 IPC；
-/// 由 apply_settings 从 TranslatorSettings 的 llm_* 字段同步而来。
-#[derive(Debug, Clone, Default)]
-pub struct LlmConfig {
-    /// API Base URL（如 `https://api.deepseek.com`）。
-    pub base_url: String,
-    /// API Key。
-    pub api_key: String,
-    /// 模型名（如 `deepseek-chat`）。
-    pub model: String,
+/// 经 PluginHandle 调用宿主统一模型服务（ModelManager）的 chat 能力，
+/// 将模型输出解析为统一翻译结果。语言能力为静态双语列表（与旧自研引擎一致）。
+pub struct HostModelProvider {
+    /// 宿主插件句柄（init 时由 TranslatorPlugin 注入），提供 model_chat 能力。
+    handle: RwLock<Option<Arc<PluginHandle>>>,
+    /// 当前选中的宿主模型全局 id（如 `openai/gpt-4o-mini`），随设置同步。
+    model_id: RwLock<String>,
+}
+
+impl HostModelProvider {
+    pub fn new() -> Self {
+        Self {
+            handle: RwLock::new(None),
+            model_id: RwLock::new(String::new()),
+        }
+    }
+
+    /// 注入插件句柄（init 时调用一次）。
+    pub fn set_handle(&self, handle: Arc<PluginHandle>) {
+        *self.handle.write() = Some(handle);
+    }
+
+    /// 同步当前选中的模型 id（apply_settings 时调用）。
+    pub fn set_model_id(&self, model_id: &str) {
+        *self.model_id.write() = model_id.to_string();
+    }
+}
+
+impl Default for HostModelProvider {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 pub const DEFAULT_TRANSLATION_SYSTEM_PROMPT: &str = r#"你是能够敏锐感知语言语体的翻译专家。根据用户给出的源语言、目标语言与原文，输出且仅输出一个 JSON 对象，不要 markdown 代码块，不要额外说明。
@@ -48,30 +74,9 @@ const SUPPORTED_LANGUAGES: &[&str] = &[
     "vi", "ms", "id",
 ];
 
-/// OpenAI 兼容 LLM 翻译引擎 Provider。
-///
-/// 通过 `{base_url}/chat/completions` 调用兼容 API，将模型输出解析为统一翻译结果。
-/// 仅在 TranslatorPlugin 内部使用，通过 ProviderRegistry 管理。
-pub struct OpenAiCompatibleProvider {
-    /// LLM 连接配置（Base URL / API Key / Model），通过 Arc<RwLock> 由 TranslatorPlugin 注入。
-    config: Arc<RwLock<LlmConfig>>,
-    /// 复用的 HTTP 客户端，在构造时创建一次，避免每次翻译请求新建连接池。
-    client: reqwest::Client,
-}
-
-impl OpenAiCompatibleProvider {
-    /// 创建新的 Provider 实例。
-    pub fn new(config: Arc<RwLock<LlmConfig>>) -> Self {
-        Self {
-            config,
-            client: reqwest::Client::new(),
-        }
-    }
-}
-
 /// LLM 返回 JSON 的主负载（camelCase 字段与提示词约定一致）。
 ///
-/// 仅限本文件内使用；用于解析 chat/completions 的 model 输出。
+/// 仅限本文件内使用；用于解析宿主模型 chat 输出的 content。
 #[derive(Debug, Deserialize)]
 struct LlmTranslationPayload {
     /// 主译文。
@@ -99,85 +104,10 @@ struct LlmSenseEntry {
     label: Option<String>,
 }
 
-/// chat/completions 响应（仅取 choices 字段）。
-///
-/// 仅限本文件内使用。
-#[derive(Debug, Deserialize)]
-struct ChatCompletionResponse {
-    /// 候选回复列表。
-    choices: Vec<ChatChoice>,
-}
-
-/// 单个候选回复。
-///
-/// 仅限本文件内使用。
-#[derive(Debug, Deserialize)]
-struct ChatChoice {
-    /// 回复消息。
-    message: ChatMessage,
-}
-
-/// 回复消息 content：兼容 string / 多段数组 / 已解析的 JSON 对象。
-///
-/// 仅限本文件内使用；用于反序列化 chat/completions 响应的 content 字段。
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum MessageContent {
-    /// 纯文本正文（绝大多数 OpenAI 兼容 API 的返回形式，可能是 JSON 字符串）。
-    Text(String),
-    /// 多模态分段正文（部分网关返回 parts 数组），仅拼接各段的 text。
-    Array(Vec<ContentPart>),
-    /// 已被网关解析为对象的正文，经 `to_string()` 重新序列化后交给解析层。
-    Object(serde_json::Value),
-}
-
-/// 多模态 content 数组中的单段。
-///
-/// 仅限本文件内使用；非文本段（如图片）不含 text，拼接时被忽略。
-#[derive(Debug, Deserialize)]
-struct ContentPart {
-    /// 本段的文本内容；None 表示该段无可拼接文本。
-    #[serde(default)]
-    text: Option<String>,
-}
-
-/// 回复消息（仅取 content 字段）。
-///
-/// 仅限本文件内使用。
-#[derive(Debug, Deserialize)]
-struct ChatMessage {
-    /// 回复正文（字符串 JSON / 多模态数组 / 已是对象）。
-    #[serde(default)]
-    content: Option<MessageContent>,
-}
-
-/// 将 `Option<MessageContent>` 归一化为字符串供 `parse_llm_content` 解析。
-///
-/// None 与畸形 JSON 值（数字/布尔/数组）返回空串，由解析层报错；
-/// Object 仅接受 JSON 对象，避免把 `42`/`true` 序列化后当作译文。
-fn message_content_to_string(content: &Option<MessageContent>) -> String {
-    match content {
-        None => String::new(),
-        Some(MessageContent::Text(s)) => s.clone(),
-        Some(MessageContent::Object(v)) => {
-            if v.is_object() {
-                v.to_string()
-            } else {
-                String::new()
-            }
-        }
-        Some(MessageContent::Array(parts)) => parts
-            .iter()
-            .filter_map(|p| p.text.as_deref())
-            .collect::<Vec<_>>()
-            .join(""),
-    }
-}
-
 /// 解析成功时的负载：(text, phonetic, computer_sense, more_senses)。
 type ParsedLlmFields = (String, Option<String>, Option<String>, Vec<SenseEntry>);
 
-/// 解析 LLM 返回的 JSON 正文（支持 camelCase 字段名）。
+/// 解析模型返回的 JSON 正文（支持 camelCase 字段名）。
 ///
 /// 容忍常见脏输出：markdown 代码块、`<think>` 前缀、说明文字后夹带 JSON、
 /// 字符串值内未转义的控制字符；若确认无可用 JSON 对象则回退为纯文本译文。
@@ -377,16 +307,6 @@ fn escape_control_chars_in_json_strings(s: &str) -> String {
     out
 }
 
-fn missing_config_error() -> String {
-    "请先在设置中填写 LLM 服务的 Base URL、API Key 和 Model".into()
-}
-
-fn config_ready(config: &LlmConfig) -> bool {
-    !config.base_url.trim().is_empty()
-        && !config.api_key.trim().is_empty()
-        && !config.model.trim().is_empty()
-}
-
 fn format_language(code: &str) -> &str {
     if code.eq_ignore_ascii_case("auto") {
         "自动检测"
@@ -404,14 +324,25 @@ fn build_user_message(req: &TranslateRequest) -> String {
     )
 }
 
+/// 将 `ModelError` 映射为面向用户的中文错误文案（复用旧引擎的错误语义）。
+fn model_error_message(e: &ModelError) -> String {
+    match e {
+        ModelError::NotSupported => "模型提供方不支持该操作".into(),
+        ModelError::ModelNotFound(id) => format!("模型不存在: {id}"),
+        ModelError::ProviderUnavailable(detail) => format!("模型提供方不可用: {detail}"),
+        ModelError::InvalidRequest(detail) => format!("模型请求参数非法: {detail}"),
+        ModelError::Transport(detail) => format!("模型传输失败: {detail}"),
+    }
+}
+
 #[async_trait]
-impl TranslationProvider for OpenAiCompatibleProvider {
+impl TranslationProvider for HostModelProvider {
     fn id(&self) -> &str {
         PROVIDER_ID
     }
 
     fn name(&self) -> &str {
-        "OpenAI 兼容"
+        "宿主模型"
     }
 
     fn language_support(&self) -> LanguageSupport {
@@ -419,82 +350,55 @@ impl TranslationProvider for OpenAiCompatibleProvider {
     }
 
     async fn translate(&self, req: &TranslateRequest) -> TranslationResult {
-        let config = self.config.read().clone();
-        if !config_ready(&config) {
-            return TranslationResult::err(PROVIDER_ID, "OpenAI 兼容", missing_config_error());
+        let model_id = self.model_id.read().clone();
+        if model_id.trim().is_empty() {
+            return TranslationResult::err(PROVIDER_ID, "宿主模型", "请在设置中选择翻译模型");
         }
 
-        let base_url = config.base_url.trim().trim_end_matches('/');
-        // P0-2: 校验 scheme，防止 file:///etc/passwd 等危险输入
-        if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
-            return TranslationResult::err(
-                PROVIDER_ID,
-                "OpenAI 兼容",
-                "LLM Base URL 必须以 http:// 或 https:// 开头",
-            );
-        }
+        let handle = match self.handle.read().clone() {
+            Some(h) => h,
+            None => {
+                return TranslationResult::err(
+                    PROVIDER_ID,
+                    "宿主模型",
+                    "插件服务句柄不可用，请重启应用后重试",
+                );
+            }
+        };
 
-        let url = format!("{base_url}/chat/completions");
-        let body = serde_json::json!({
-            "model": config.model,
-            "stream": false,
-            "messages": [
-                {"role": "system", "content": DEFAULT_TRANSLATION_SYSTEM_PROMPT},
-                {"role": "user", "content": build_user_message(req)},
+        let chat_req = ModelChatRequest {
+            model_id,
+            messages: vec![
+                ModelChatMessage {
+                    role: ModelChatRole::System,
+                    content: DEFAULT_TRANSLATION_SYSTEM_PROMPT.to_string(),
+                },
+                ModelChatMessage {
+                    role: ModelChatRole::User,
+                    content: build_user_message(req),
+                },
             ],
-        });
+            temperature: None,
+            max_tokens: None,
+            reasoning_effort: None,
+        };
 
-        let response = match self
-            .client
-            .post(&url)
-            .bearer_auth(config.api_key.trim())
-            .json(&body)
-            .send()
-            .await
-        {
+        let resp = match handle.model_chat(chat_req).await {
             Ok(r) => r,
             Err(e) => {
+                warn!("宿主模型翻译失败: {}; model={}", e, req.text.len());
                 return TranslationResult::err(
                     PROVIDER_ID,
-                    "OpenAI 兼容",
-                    format!("请求 LLM 服务失败: {e}"),
+                    "宿主模型",
+                    format!("模型调用失败: {}", model_error_message(&e)),
                 );
             }
         };
 
-        if !response.status().is_success() {
-            let status = response.status();
-            // P0-3: 服务端错误详情只记日志，不暴露给前端
-            let detail = response.text().await.unwrap_or_default();
-            error!("LLM 服务返回错误 ({}): {}", status, detail);
-            return TranslationResult::err(
-                PROVIDER_ID,
-                "OpenAI 兼容",
-                format!("LLM 服务返回错误 ({status})"),
-            );
-        }
-
-        let completion: ChatCompletionResponse = match response.json().await {
-            Ok(c) => c,
-            Err(e) => {
-                return TranslationResult::err(
-                    PROVIDER_ID,
-                    "OpenAI 兼容",
-                    format!("解析 LLM 响应失败: {e}"),
-                );
-            }
-        };
-
-        let content = completion
-            .choices
-            .first()
-            .map(|c| message_content_to_string(&c.message.content))
-            .unwrap_or_default();
-
-        match parse_llm_content(&content) {
+        match parse_llm_content(&resp.content) {
             Ok((text, phonetic, computer_sense, more_senses)) => TranslationResult::ok(
                 PROVIDER_ID,
-                "OpenAI 兼容",
+                "宿主模型",
                 text,
                 phonetic,
                 computer_sense,
@@ -504,9 +408,9 @@ impl TranslationProvider for OpenAiCompatibleProvider {
             .normalize_senses(),
             Err(e) => {
                 // 解析失败属预期高频场景（轻量模型不按格式输出）：只记可定位信息，
-                // 不记录模型输出内容（用户译文）与 base_url（可能内嵌凭据）
-                warn!("LLM JSON 解析失败: {}; model={}", e, config.model);
-                TranslationResult::err(PROVIDER_ID, "OpenAI 兼容", e)
+                // 不记录模型输出内容（用户译文）
+                warn!("模型 JSON 解析失败: {}; model={}", e, req.text.len());
+                TranslationResult::err(PROVIDER_ID, "宿主模型", e)
             }
         }
     }
@@ -620,42 +524,9 @@ mod tests {
         assert!(err.contains("空"), "err={err}");
     }
 
-    #[test]
-    fn message_content_to_string_handles_all_variants() {
-        assert_eq!(message_content_to_string(&None), "");
-        assert_eq!(
-            message_content_to_string(&Some(MessageContent::Text("hi".into()))),
-            "hi"
-        );
-        assert_eq!(
-            message_content_to_string(&Some(MessageContent::Object(
-                serde_json::json!({"text": "hi"})
-            ))),
-            r#"{"text":"hi"}"#
-        );
-        // 畸形值（数字/布尔/数组）不得被序列化后当作译文：按空串处理交给解析层报错
-        assert_eq!(
-            message_content_to_string(&Some(MessageContent::Object(serde_json::json!(42)))),
-            ""
-        );
-        let parts = vec![
-            ContentPart {
-                text: Some("a".into()),
-            },
-            ContentPart { text: None },
-            ContentPart {
-                text: Some("b".into()),
-            },
-        ];
-        assert_eq!(
-            message_content_to_string(&Some(MessageContent::Array(parts))),
-            "ab"
-        );
-    }
-
     #[tokio::test]
-    async fn missing_config_returns_chinese_error() {
-        let p = OpenAiCompatibleProvider::new(Arc::new(RwLock::new(LlmConfig::default())));
+    async fn missing_model_returns_chinese_error() {
+        let p = HostModelProvider::new();
         let r = p
             .translate(&TranslateRequest {
                 text: "hi".into(),
@@ -665,5 +536,20 @@ mod tests {
             .await;
         assert!(!r.is_success());
         assert!(r.error.as_deref().unwrap_or("").contains("设置"));
+    }
+
+    #[tokio::test]
+    async fn missing_handle_returns_chinese_error() {
+        let p = HostModelProvider::new();
+        p.set_model_id("openai/gpt-4o-mini");
+        let r = p
+            .translate(&TranslateRequest {
+                text: "hi".into(),
+                source: "en".into(),
+                target: "zh".into(),
+            })
+            .await;
+        assert!(!r.is_success());
+        assert!(r.error.as_deref().unwrap_or("").contains("句柄"));
     }
 }

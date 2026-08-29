@@ -30,7 +30,6 @@
     "pressEnterToTranslate": "按 Enter 翻譯",
     "translateFailed": "翻譯失敗，請稍後重試",
     "computerSense": "計算機",
-    "otherEngines": "其他引擎",
     "sectionBasic": "基礎",
     "translateTrigger": "翻譯觸發",
     "triggerHint": "即時：輸入即翻譯；按 Enter：確認後才請求，節省 token",
@@ -39,37 +38,14 @@
     "liveDebounceSecs": "即時翻譯防抖（秒）",
     "liveDebounceHint": "即時模式下輸入後的防抖等待時間，減少冗餘請求",
     "sectionEngine": "引擎",
-    "translateEngine": "翻譯引擎",
-    "engineOrderHint": "拖拽調整順序，靠前的引擎優先作為主結果",
-    "dragToReorder": "拖拽調序",
-    "providerOpenaiCompatible": "OpenAI 相容",
-    "providerMock": "模擬示例",
-    "providerMockHint": "聯呼叫：有其它引擎成功結果時複製其一，否則顯示佔位文案",
-    "vendorPreset": "廠商預設",
-    "vendorPresetHint": "選擇預設將立刻填入 Base URL；選「自定義」不會覆蓋當前地址",
-    "vendorPresets": "廠商預設列表",
-    "vendorPresetLabelPlaceholder": "廠商名稱",
-    "vendorPresetUrlPlaceholder": "https://...",
-    "addVendorPreset": "新增預設",
-    "removeVendorPreset": "刪除",
-    "baseUrl": "Base URL",
-    "baseUrlPlaceholder": "例如 https://api.deepseek.com",
-    "apiKey": "API Key",
-    "apiKeyPlaceholder": "請輸入 API Key",
-    "model": "Model",
-    "modelPlaceholder": "例如 deepseek-chat、moonshot-v1-8k",
+    "modelId": "翻譯模型",
+    "modelIdPlaceholder": "請選擇宿主模型",
+    "modelIdHint": "選擇宿主「模型管理」中已配置的聊天模型",
+    "modelLoadFailed": "模型列表載入失敗",
+    "modelLoadRetry": "重試",
     "apply": "應用",
     "modeLive": "即時翻譯",
-    "modeOnEnter": "按 Enter 翻譯",
-    "vendorDeepSeek": "DeepSeek",
-    "vendorZhipu": "智譜 GLM",
-    "vendorOpenAI": "OpenAI",
-    "vendorSiliconFlow": "矽基流動",
-    "vendorBailian": "阿里雲百鍊",
-    "vendorTokenHub": "騰訊雲 TokenHub",
-    "vendorKimi": "Kimi",
-    "vendorMiMo": "小米 MiMo",
-    "vendorCustom": "自定義"
+    "modeOnEnter": "按 Enter 翻譯"
   },
   "footer": {
     "settings": "設定",
@@ -1216,8 +1192,7 @@
       "description": "在搜尋欄中進行多引擎翻譯",
       "groups": {
         "basic": "基礎",
-        "engine": "引擎",
-        "llmService": "LLM 服務"
+        "engine": "引擎"
       },
       "fields": {
         "translate_mode": {
@@ -1228,10 +1203,6 @@
           "label": "預設目標語言",
           "desc": "未寫語言碼時的目標語（源語自動檢測；若與源語相同則回退到另一常用語）"
         },
-        "enabled_providers": {
-          "label": "翻譯引擎",
-          "desc": "參與並行翻譯的引擎；列表順序即結果優先順序"
-        },
         "request_timeout_ms": {
           "label": "超時（毫秒）",
           "desc": "單個引擎的請求超時時間"
@@ -1240,21 +1211,9 @@
           "label": "即時翻譯防抖（秒）",
           "desc": "即時模式下輸入後的防抖等待時間，減少冗餘請求"
         },
-        "llm_vendor": {
-          "label": "廠商預設",
-          "desc": "點「應用」後寫入對應 Base URL；選「自定義」不改寫地址"
-        },
-        "llm_base_url": {
-          "label": "Base URL",
-          "desc": "OpenAI 相容 API 根地址（如 https://api.deepseek.com）"
-        },
-        "llm_api_key": {
-          "label": "API Key",
-          "desc": "LLM 服務的 API 金鑰（請妥善保管）"
-        },
-        "llm_model": {
-          "label": "Model",
-          "desc": "模型名稱（如 deepseek-chat、moonshot-v1-8k）"
+        "model_id": {
+          "label": "翻譯模型",
+          "desc": "宿主模型服務中已配置的聊天模型 id"
         }
       }
     },

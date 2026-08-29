@@ -2,7 +2,6 @@ mod plugin;
 mod provider;
 mod providers;
 mod query_parser;
-mod registry;
 
 pub use plugin::TranslatorPlugin;
 pub use provider::{LanguageSupport, TranslateRequest, TranslationProvider, TranslationResult};

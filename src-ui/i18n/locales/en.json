@@ -30,7 +30,6 @@
     "pressEnterToTranslate": "Press Enter to translate",
     "translateFailed": "Translation failed, please try again later",
     "computerSense": "Computer",
-    "otherEngines": "Other engines",
     "sectionBasic": "Basic",
     "translateTrigger": "Translate trigger",
     "triggerHint": "Live: translate as you type; Enter: request only after confirmation, saves tokens",
@@ -39,37 +38,14 @@
     "liveDebounceSecs": "Live translation debounce (seconds)",
     "liveDebounceHint": "Debounce wait after typing in live mode, reduces redundant requests",
     "sectionEngine": "Engine",
-    "translateEngine": "Translation engines",
-    "engineOrderHint": "Drag to reorder; engines at the top take priority as the primary result",
-    "dragToReorder": "Drag to reorder",
-    "providerOpenaiCompatible": "OpenAI-compatible",
-    "providerMock": "Mock example",
-    "providerMockHint": "Integration testing: copies another engine's result when available, otherwise shows placeholder text",
-    "vendorPreset": "Vendor preset",
-    "vendorPresetHint": "Selecting a preset fills in the Base URL immediately; choosing \"Custom\" does not overwrite the current address",
-    "vendorPresets": "Vendor presets",
-    "vendorPresetLabelPlaceholder": "Vendor name",
-    "vendorPresetUrlPlaceholder": "https://...",
-    "addVendorPreset": "Add preset",
-    "removeVendorPreset": "Remove",
-    "baseUrl": "Base URL",
-    "baseUrlPlaceholder": "e.g. https://api.deepseek.com",
-    "apiKey": "API Key",
-    "apiKeyPlaceholder": "Enter your API Key",
-    "model": "Model",
-    "modelPlaceholder": "e.g. deepseek-chat, moonshot-v1-8k",
+    "modelId": "Translation model",
+    "modelIdPlaceholder": "Select a host model",
+    "modelIdHint": "Select a chat model configured in the host \"Models\" management",
+    "modelLoadFailed": "Failed to load model list",
+    "modelLoadRetry": "Retry",
     "apply": "Apply",
     "modeLive": "Translate live",
-    "modeOnEnter": "Translate on Enter",
-    "vendorDeepSeek": "DeepSeek",
-    "vendorZhipu": "Zhipu GLM",
-    "vendorOpenAI": "OpenAI",
-    "vendorSiliconFlow": "SiliconFlow",
-    "vendorBailian": "Alibaba Cloud Bailian",
-    "vendorTokenHub": "Tencent Cloud TokenHub",
-    "vendorKimi": "Kimi",
-    "vendorMiMo": "Xiaomi MiMo",
-    "vendorCustom": "Custom"
+    "modeOnEnter": "Translate on Enter"
   },
   "footer": {
     "settings": "Settings",
@@ -1216,8 +1192,7 @@
       "description": "Translate with multiple engines in the search bar",
       "groups": {
         "basic": "Basic",
-        "engine": "Engines",
-        "llmService": "LLM Service"
+        "engine": "Engines"
       },
       "fields": {
         "translate_mode": {
@@ -1228,10 +1203,6 @@
           "label": "Default target language",
           "desc": "Target language when no code is given (source auto-detected; falls back to another common language if equal to source)"
         },
-        "enabled_providers": {
-          "label": "Translation engines",
-          "desc": "Engines for parallel translation; list order is result priority"
-        },
         "request_timeout_ms": {
           "label": "Timeout (ms)",
           "desc": "Request timeout of a single engine"
@@ -1240,21 +1211,9 @@
           "label": "Live debounce (s)",
           "desc": "Debounce wait after input in instant mode to reduce redundant requests"
         },
-        "llm_vendor": {
-          "label": "Vendor preset",
-          "desc": "Click \"Apply\" to write the preset Base URL; \"Custom\" keeps the address untouched"
-        },
-        "llm_base_url": {
-          "label": "Base URL",
-          "desc": "OpenAI-compatible API root URL (e.g. https://api.deepseek.com)"
-        },
-        "llm_api_key": {
-          "label": "API Key",
-          "desc": "API key of the LLM service (keep it safe)"
-        },
-        "llm_model": {
-          "label": "Model",
-          "desc": "Model name (e.g. deepseek-chat, moonshot-v1-8k)"
+        "model_id": {
+          "label": "Translation model",
+          "desc": "Chat model id configured in the host model service"
         }
       }
     },

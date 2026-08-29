@@ -38,7 +38,7 @@ pub const MAX_MORE_SENSES: usize = 4;
 /// 面板 JSON 由 plugin.rs 的 result_to_json 另行构造，键名为 camelCase。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TranslationResult {
-    /// 引擎 id（如 `openai-compatible`、`mock`）。
+    /// 引擎 id（如 `host-model`）。
     pub provider_id: String,
     /// 引擎展示名。
     pub provider_name: String,

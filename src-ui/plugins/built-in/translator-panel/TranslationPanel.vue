@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
-import { NButton, NCollapse, NCollapseItem, NTag, useNotification } from 'naive-ui'
+import { NButton, NTag, useNotification } from 'naive-ui'
 import type { NotificationReactive } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { ResultAction } from '@/bridge/contract'
@@ -86,7 +86,6 @@ const primaryError = computed(() => primary.value?.error ?? null)
 const primaryPhonetic = computed(() => primary.value?.phonetic?.trim() ?? '')
 const primaryComputerSense = computed(() => primary.value?.computerSense?.trim() ?? '')
 const primaryMoreSenses = computed(() => (primary.value?.moreSenses ?? []).slice(0, 4))
-const alternatives = computed(() => props.data?.alternatives ?? [])
 
 // 所有面板动作（含复制译文）统一经 bridge_confirm 委托后端执行：
 // 剪贴板写入由后端经 PluginHandle 完成，前端不做平台操作（RULES.md 前后端职责边界）。
@@ -155,22 +154,6 @@ async function executeAction(action: ResultAction) {
             <span class="tr-sense-text">{{ sense.text }}</span>
           </div>
         </div>
-      </div>
-
-      <div v-if="alternatives.length > 0" class="tr-alts">
-        <n-collapse>
-          <n-collapse-item :title="$t('translator.otherEngines')" name="alts">
-            <div
-              v-for="alt in alternatives"
-              :key="alt.providerId"
-              class="tr-alt-row"
-            >
-              <span class="tr-alt-name">{{ alt.providerName }}</span>
-              <span v-if="alt.error" class="tr-alt-error">{{ alt.error }}</span>
-              <span v-else class="tr-alt-text">{{ alt.text }}</span>
-            </div>
-          </n-collapse-item>
-        </n-collapse>
       </div>
     </template>
 
@@ -309,33 +292,6 @@ async function executeAction(action: ResultAction) {
 
 .tr-sense-text {
   word-break: break-word;
-}
-
-.tr-alt-row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 0;
-}
-
-.tr-alt-row + .tr-alt-row {
-  border-top: 1px solid var(--border-color, rgba(0, 0, 0, 0.06));
-}
-
-.tr-alt-name {
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-}
-
-.tr-alt-text {
-  font-size: var(--font-size-base);
-  color: var(--text-primary);
-  word-break: break-word;
-}
-
-.tr-alt-error {
-  font-size: var(--font-size-sm);
-  color: #d03050;
 }
 
 .tr-actions {
