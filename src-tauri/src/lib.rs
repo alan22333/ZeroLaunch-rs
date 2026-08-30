@@ -226,6 +226,7 @@ pub fn run() {
             crate::commands::debug::debug_test_index_time,
             crate::commands::debug::debug_get_search_keys,
             crate::commands::debug::debug_search_detail,
+            crate::commands::debug::debug_copy_search_detail,
             // Third-party Plugin Management
             crate::commands::plugin::plugin_list,
             crate::commands::plugin::plugin_get_manifest,

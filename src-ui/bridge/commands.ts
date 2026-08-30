@@ -315,6 +315,9 @@ export function debugGetSearchKeys(name: string): Promise<string[]> {
 export function debugSearchDetail(query: string): Promise<SearchDetailItem[]> {
   return invokeCommand('debug_search_detail', { query })
 }
+export function debugCopySearchDetail(text: string): Promise<void> {
+  return invokeCommand('debug_copy_search_detail', { text })
+}
 
 // ---- i18n ----
 

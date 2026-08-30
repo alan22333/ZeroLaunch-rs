@@ -61,6 +61,9 @@
         <n-button type="primary" size="small" :loading="detail.loading" @click="detail.run">
           {{ t('debug.search') }}
         </n-button>
+        <n-button size="small" :disabled="!detail.result?.length" @click="copyDetail">
+          {{ t('debug.copy') }}
+        </n-button>
       </div>
       <n-data-table
         v-if="detail.result"
@@ -89,6 +92,7 @@ import {
   debugTestIndexTime,
   debugGetSearchKeys,
   debugSearchDetail,
+  debugCopySearchDetail,
 } from '@/bridge/commands'
 import type {
   IndexTimingResult,
@@ -183,6 +187,54 @@ const detailColumns = computed<DataTableColumns<SearchDetailItem>>(() => [
     render: (row) => h('strong', { class: 'score-cell-total' }, row.score.toFixed(4)),
   },
 ])
+/**
+ * 按展示列序（固定列 + 动态分数列 + 总分）将详情结果组装为制表符分隔文本。
+ * 取前 15 条；表头为各列标题。供复制按钮写入剪贴板。
+ */
+function buildDetailText(): string {
+  const rows = detail.result ?? []
+  const header = [
+    t('debug.colRank'),
+    t('debug.colId'),
+    t('debug.colName'),
+    t('debug.colType'),
+    t('debug.colTarget'),
+    t('debug.colKeywords'),
+    ...scoreColumns.value.map((c) => String((c as { title?: unknown }).title ?? '')),
+    t('debug.colScore'),
+  ]
+  const cells = (row: SearchDetailItem): string[] => [
+    String(row.rank),
+    String(row.candidateId),
+    row.name,
+    row.targetType,
+    row.targetText,
+    row.keywords.join(', '),
+    ...scoreColumns.value.map((c) => {
+      const key = (c as { key: string }).key
+      const d = row.detailedScore?.find((x) => x.description === key)
+      if (!d) return '—'
+      return d.kind === 'multiply' ? `× ${d.score.toFixed(4)}` : `${d.score.toFixed(4)} (×${d.weight.toFixed(2)})`
+    }),
+    row.score.toFixed(4),
+  ]
+  const lines = [header.join('\t'), ...rows.slice(0, 15).map((r) => cells(r).join('\t'))]
+  return lines.join('\n')
+}
+
+/** 复制前 15 条详情到剪贴板（经后端写入，符合前后端职责边界）。 */
+async function copyDetail() {
+  if (!detail.result?.length) {
+    message.warning(t('debug.noResult'))
+    return
+  }
+  try {
+    await debugCopySearchDetail(buildDetailText())
+    message.success(t('debug.copied'))
+  } catch {
+    message.error(t('debug.queryFailed'))
+  }
+}
 </script>
 
 <style scoped>

@@ -2,7 +2,7 @@
 //! 所有命令仅在调试模式开启时可用（通过 AppState::is_debug_mode() 检查）。
 //! 返回类型遵循 serde-rename 规范，每个字段显式标注 `#[serde(rename)]`。
 
-use crate::commands::bridge_error::BridgeError;
+use crate::commands::bridge_error::{BridgeError, WithTraceId};
 use crate::state::app_state::AppState;
 use serde::Serialize;
 use std::sync::Arc;
@@ -167,4 +167,27 @@ pub async fn debug_search_detail(
         .collect();
 
     Ok(items)
+}
+/// 复制文本到系统剪贴板（供调试页复制结构化结果，经宿主剪贴板管理器写入）。
+/// 参数：text - 要写入剪贴板的文本。
+/// 返回：成功返回 Ok(())，失败返回 BridgeError（剪贴板写入失败）。
+#[tauri::command]
+#[tracing::instrument(skip(state), fields(trace_id))]
+pub async fn debug_copy_search_detail(
+    state: tauri::State<'_, Arc<AppState>>,
+    text: String,
+) -> Result<(), BridgeError> {
+    let trace_id = crate::utils::trace_id::generate_trace_id();
+    tracing::Span::current().record("trace_id", trace_id.as_str());
+
+    if !state.is_debug_mode() {
+        return Err(
+            BridgeError::internal("调试模式未开启，请在设置中启用").with_trace_id(&trace_id)
+        );
+    }
+
+    state
+        .get_core_handle()
+        .set_clipboard_text(&text)
+        .with_trace_id(&trace_id)
 }
