@@ -29,6 +29,8 @@ pub enum KnownPath {
     AppIconCacheDir,
     /// 配置目录（AppDataDir/config）
     AppConfigDir,
+    /// 插件本地缓存目录（AppDataDir/plugin-cache）
+    AppCacheDir,
 }
 
 /// 路径解析器 trait，定义平台原语。

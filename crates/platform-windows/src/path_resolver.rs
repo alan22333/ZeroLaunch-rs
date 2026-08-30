@@ -40,7 +40,8 @@ impl WindowsPathResolver {
             KnownPath::AppDataDir
             | KnownPath::AppLogDir
             | KnownPath::AppIconCacheDir
-            | KnownPath::AppConfigDir => None,
+            | KnownPath::AppConfigDir
+            | KnownPath::AppCacheDir => None,
         }
     }
 
@@ -52,6 +53,7 @@ impl WindowsPathResolver {
                 | KnownPath::AppLogDir
                 | KnownPath::AppIconCacheDir
                 | KnownPath::AppConfigDir
+                | KnownPath::AppCacheDir
         )
     }
 
@@ -158,6 +160,13 @@ impl WindowsPathResolver {
                 let app_data = self.resolve_app_data_dir()?;
                 Ok(Path::new(&app_data)
                     .join("config")
+                    .to_string_lossy()
+                    .to_string())
+            }
+            KnownPath::AppCacheDir => {
+                let app_data = self.resolve_app_data_dir()?;
+                Ok(Path::new(&app_data)
+                    .join("plugin-cache")
                     .to_string_lossy()
                     .to_string())
             }

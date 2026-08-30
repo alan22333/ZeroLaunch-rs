@@ -584,7 +584,8 @@ impl PluginHandle {
         key: &str,
         data: &[u8],
     ) -> Result<(), HostApiError> {
-        let path = build_cache_path(&self.plugin_id, domain, key)?;
+        let cache_root = self.resolve_path(KnownPath::AppCacheDir)?;
+        let path = build_cache_path(&cache_root, &self.plugin_id, domain, key)?;
         if let Some(parent) = std::path::Path::new(&path).parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|e| {
                 HostApiError::StorageOperationFailed {
@@ -608,7 +609,8 @@ impl PluginHandle {
         domain: &str,
         key: &str,
     ) -> Result<Option<Vec<u8>>, HostApiError> {
-        let path = build_cache_path(&self.plugin_id, domain, key)?;
+        let cache_root = self.resolve_path(KnownPath::AppCacheDir)?;
+        let path = build_cache_path(&cache_root, &self.plugin_id, domain, key)?;
         match tokio::fs::read(&path).await {
             Ok(data) => Ok(Some(data)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -621,7 +623,8 @@ impl PluginHandle {
 
     /// 删除插件本地缓存条目；缓存不存在时视为成功。
     pub async fn cache_delete(&self, domain: &str, key: &str) -> Result<(), HostApiError> {
-        let path = build_cache_path(&self.plugin_id, domain, key)?;
+        let cache_root = self.resolve_path(KnownPath::AppCacheDir)?;
+        let path = build_cache_path(&cache_root, &self.plugin_id, domain, key)?;
         match tokio::fs::remove_file(&path).await {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -738,10 +741,15 @@ fn normalize_path(path: &std::path::Path) -> std::path::PathBuf {
     result
 }
 
-/// 构建本地缓存文件路径：`plugin-cache/<plugin_id>/<domain>/<key>`。
+/// 构建本地缓存文件路径：`<cache_root>/<plugin_id>/<domain>/<key>`。
 /// 校验 domain 与 key（拒绝空串、"."、".." 与路径穿越），策略同 build_resource_path。
 /// 缓存根目录为宿主 app data 下的 plugin-cache/，不经 StorageService。
-fn build_cache_path(plugin_id: &str, domain: &str, key: &str) -> Result<String, HostApiError> {
+fn build_cache_path(
+    cache_root: &str,
+    plugin_id: &str,
+    domain: &str,
+    key: &str,
+) -> Result<String, HostApiError> {
     for segment in [domain, key] {
         if segment.is_empty() || segment == "." || segment == ".." {
             return Err(HostApiError::PathTraversalRejected {
@@ -749,7 +757,9 @@ fn build_cache_path(plugin_id: &str, domain: &str, key: &str) -> Result<String, 
             });
         }
     }
-    let base = std::path::PathBuf::from_iter(["plugin-cache", plugin_id, domain]);
+    let base = std::path::Path::new(cache_root)
+        .join(plugin_id)
+        .join(domain);
     let base_normalized = normalize_path(&base);
     let mut path = base;
     path.push(key);
@@ -839,10 +849,15 @@ mod tests {
 
     #[test]
     fn build_cache_path_accepts_valid_segments() {
-        let result = build_cache_path("test-plugin", "model-embedding", "ab/abc123.bin");
+        let result = build_cache_path(
+            "C:/mock/zl-cache",
+            "test-plugin",
+            "model-embedding",
+            "ab/abc123.bin",
+        );
         assert!(result.is_ok());
         let path = result.unwrap();
-        assert!(path.starts_with("plugin-cache/test-plugin/model-embedding/"));
+        assert!(path.starts_with("C:/mock/zl-cache/test-plugin/model-embedding/"));
         assert!(path.ends_with("abc123.bin"));
     }
 
@@ -857,7 +872,7 @@ mod tests {
             ("a", ""),
         ] {
             assert!(
-                build_cache_path("test-plugin", domain, key).is_err(),
+                build_cache_path("C:/mock/zl-cache", "test-plugin", domain, key).is_err(),
                 "应拒绝 domain={domain:?} key={key:?}"
             );
         }
