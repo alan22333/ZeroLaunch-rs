@@ -29,12 +29,12 @@ const L2_VERSION: u8 = 1;
 struct CacheKeyPayload<'a> {
     /// 提供方身份（如 "openai"），与 model_id 前缀独立：不同提供方的相同 model_id 相互隔离。
     provider: &'a str,
-    /// 单条输入请求（input 仅含该条文本及其对应的 title/task_type/dimensions）。
+    /// 单条输入请求（input 仅含该条文本及其对应的 template_args/task_type/dimensions）。
     request: &'a ModelEmbeddingRequest,
 }
 
 /// 计算缓存键：`sha256(serde_json(provider ‖ 单条输入请求))`。
-/// 提供方/模型/文本/标题/任务类型/维度任一不同即不同条目；
+/// 提供方/模型/文本/模板参数/任务类型/维度任一不同即不同条目；
 /// 组装由提供方内部完成，键直接覆盖请求参数全集，无需感知最终输入文本。
 pub fn compute_key(provider: &str, single: &ModelEmbeddingRequest) -> [u8; 32] {
     let payload = CacheKeyPayload {
@@ -148,13 +148,14 @@ mod tests {
     fn single_request(
         model_id: &str,
         text: &str,
-        title: Option<&str>,
+        template_args: Option<&[&str]>,
         dimensions: Option<u32>,
     ) -> ModelEmbeddingRequest {
         ModelEmbeddingRequest {
             model_id: model_id.to_string(),
             input: vec![text.to_string()],
-            titles: title.map(|t| vec![t.to_string()]),
+            template_args: template_args
+                .map(|args| vec![args.iter().map(|a| a.to_string()).collect()]),
             task_type: None,
             dimensions,
         }
@@ -212,7 +213,7 @@ mod tests {
             a,
             compute_key(
                 "openai",
-                &single_request("openai/m", "text", Some("t1"), Some(256))
+                &single_request("openai/m", "text", Some(&["t1"]), Some(256))
             )
         );
         // task_type 参与键

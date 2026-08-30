@@ -287,14 +287,17 @@ impl ModelProvider for OllamaProvider {
             ModelEntryConfig::Embedding { config, .. } => Some(config),
             ModelEntryConfig::Chat { .. } => None,
         });
-        let caps = embedding_config
-            .map(|config| config.capabilities.as_slice())
-            .unwrap_or(&[]);
         let texts = compose_embedding_texts(
             &req.input,
-            req.titles.as_deref(),
             req.task_type.as_deref(),
-            caps,
+            embedding_config
+                .map(|config| config.capabilities.as_slice())
+                .unwrap_or(&[]),
+            embedding_config
+                .map(|config| config.task_templates.as_slice())
+                .unwrap_or(&[]),
+            &req.model_id,
+            req.template_args.as_deref(),
         )?;
         let mut request = GenerateEmbeddingsRequest::new(
             short_model(&req.model_id).to_string(),

@@ -5,6 +5,7 @@
 
 mod compose;
 mod embedding_cache;
+pub(crate) mod model_profiles;
 mod ollama_provider;
 mod openai_compatible_provider;
 mod settings;
@@ -186,19 +187,14 @@ impl ModelService for ModelManager {
         else {
             return Err(ModelError::NotSupported);
         };
-        if let Some(titles) = &req.titles {
-            if titles.len() != req.input.len() {
+        validate_embedding_request(req.task_type.as_deref(), capabilities)?;
+        if let Some(args) = &req.template_args {
+            if args.len() != req.input.len() {
                 return Err(ModelError::InvalidRequest(
-                    "titles 数量与 input 不一致".to_string(),
+                    "template_args 数量与 input 不一致".to_string(),
                 ));
             }
         }
-        validate_embedding_request(
-            req.input.len(),
-            req.titles.as_deref(),
-            req.task_type.as_deref(),
-            capabilities,
-        )?;
         if req.dimensions.is_some() {
             require_embedding_capability(
                 capabilities,
@@ -213,23 +209,23 @@ impl ModelService for ModelManager {
         struct Miss {
             idx: usize,
             text: String,
-            title: Option<String>,
+            args: Option<Vec<String>>,
             key: [u8; 32],
         }
         let mut cached: Vec<(usize, Arc<Vec<f32>>)> = Vec::new();
         let mut misses: Vec<Miss> = Vec::new();
         if let Some(cache) = &cache {
             for (idx, text) in req.input.iter().enumerate() {
-                let title = req
-                    .titles
+                let args = req
+                    .template_args
                     .as_ref()
-                    .and_then(|titles| titles.get(idx).cloned());
+                    .map(|args| args.get(idx).cloned().unwrap_or_default());
                 let key = embedding_cache::compute_key(
                     &cache_namespace,
                     &ModelEmbeddingRequest {
                         model_id: req.model_id.clone(),
                         input: vec![text.clone()],
-                        titles: title.as_ref().map(|t| vec![t.clone()]),
+                        template_args: args.as_ref().map(|a| vec![a.clone()]),
                         task_type: req.task_type.clone(),
                         dimensions: req.dimensions,
                     },
@@ -248,7 +244,7 @@ impl ModelService for ModelManager {
                     None => misses.push(Miss {
                         idx,
                         text: text.clone(),
-                        title,
+                        args,
                         key,
                     }),
                 }
@@ -261,10 +257,10 @@ impl ModelService for ModelManager {
                 .map(|(idx, text)| Miss {
                     idx,
                     text: text.clone(),
-                    title: req
-                        .titles
+                    args: req
+                        .template_args
                         .as_ref()
-                        .and_then(|titles| titles.get(idx).cloned()),
+                        .and_then(|args| args.get(idx).cloned()),
                     key: [0; 32],
                 })
                 .collect();
@@ -278,10 +274,10 @@ impl ModelService for ModelManager {
             let sub = ModelEmbeddingRequest {
                 model_id: req.model_id.clone(),
                 input: misses.iter().map(|m| m.text.clone()).collect(),
-                titles: req.titles.as_ref().map(|_| {
+                template_args: req.template_args.as_ref().map(|_| {
                     misses
                         .iter()
-                        .map(|m| m.title.clone().unwrap_or_default())
+                        .map(|m| m.args.clone().unwrap_or_default())
                         .collect()
                 }),
                 task_type: req.task_type.clone(),
@@ -610,7 +606,7 @@ mod tests {
             .embedding(ModelEmbeddingRequest {
                 model_id: "embedding-pro/m1".to_string(),
                 input: vec!["text".to_string()],
-                titles: None,
+                template_args: None,
                 task_type: None,
                 dimensions: None,
             })

@@ -107,13 +107,16 @@ impl Configurable for ModelOllamaConfigComponent {
     }
 
     async fn apply_settings(&self, settings: Value) -> Result<(), ConfigError> {
-        let parsed: ModelOllamaSettings = serde_json::from_value(settings).unwrap_or_else(|e| {
-            warn!(
-                "failed to parse settings for {}, using defaults: {e}",
-                self.component_id()
-            );
-            ModelOllamaSettings::default()
-        });
+        let mut parsed: ModelOllamaSettings =
+            serde_json::from_value(settings).unwrap_or_else(|e| {
+                warn!(
+                    "failed to parse settings for {}, using defaults: {e}",
+                    self.component_id()
+                );
+                ModelOllamaSettings::default()
+            });
+        // 匹配内置模型档案时自动勾选能力并填充任务模板（用户显式配置不覆盖）。
+        crate::core::model::model_profiles::apply_profiles_to_entries(&mut parsed.models);
         *self.settings.write() = parsed;
         Ok(())
     }

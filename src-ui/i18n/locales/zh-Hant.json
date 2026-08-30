@@ -686,6 +686,18 @@
         "embedding_capabilities": {
           "label": "Embedding 能力",
           "desc": "選擇此模型支援的輸入與輸出能力；只有勾選的能力會被使用"
+        },
+        "task_templates": {
+          "label": "任務模板",
+          "desc": "語義任務對應的輸入模板；{0} = 輸入文本，{1}+ = 請求模板參數依序填充。留空使用內建模型規則",
+          "task": {
+            "label": "語義任務",
+            "desc": "跨模型統一的語義任務類型"
+          },
+          "template": {
+            "label": "模板",
+            "desc": "輸入模板，{0} = 輸入文本，{1}+ = 模板參數依序填充"
+          }
         }
       },
       "kinds": {
@@ -705,9 +717,16 @@
       },
       "capabilities": {
         "reasoning": "深度思考 (reasoning)",
-        "title": "標題輸入 (title)",
         "task_type": "任務類型提示 (taskType)",
         "output_dimensions": "輸出維度裁剪 (outputDimensions)"
+      },
+      "tasks": {
+        "retrieval_document": "檢索文件",
+        "retrieval_query": "檢索查詢",
+        "semantic_similarity": "語義相似度",
+        "classification": "分類",
+        "clustering": "聚類",
+        "plain_text": "裸文本直傳（無模板）"
       }
     },
     "hotkey-config": {

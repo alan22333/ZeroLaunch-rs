@@ -211,7 +211,6 @@ pub(crate) fn model_entry_schema() -> Vec<SettingDefinition> {
             t_key!("model-entry", "fields.embedding_capabilities.desc"),
         )
         .options_with_labels(&[
-            ("title", t_key!("model-entry", "capabilities.title")),
             ("taskType", t_key!("model-entry", "capabilities.task_type")),
             (
                 "outputDimensions",
@@ -220,6 +219,53 @@ pub(crate) fn model_entry_schema() -> Vec<SettingDefinition> {
         ])
         .default(serde_json::json!(["outputDimensions"]))
         .order(12)
+        .visible_when("kind", "embedding")
+        .build(),
+        SchemaBuilder::array(
+            "task_templates",
+            t_key!("model-entry", "fields.task_templates.label"),
+            t_key!("model-entry", "fields.task_templates.desc"),
+        )
+        .object_items(vec![
+            SchemaBuilder::select(
+                "task",
+                t_key!("model-entry", "fields.task_templates.task.label"),
+                t_key!("model-entry", "fields.task_templates.task.desc"),
+            )
+            .options_with_labels(&[
+                (
+                    "retrieval_document",
+                    t_key!("model-entry", "tasks.retrieval_document"),
+                ),
+                (
+                    "retrieval_query",
+                    t_key!("model-entry", "tasks.retrieval_query"),
+                ),
+                (
+                    "semantic_similarity",
+                    t_key!("model-entry", "tasks.semantic_similarity"),
+                ),
+                (
+                    "classification",
+                    t_key!("model-entry", "tasks.classification"),
+                ),
+                ("clustering", t_key!("model-entry", "tasks.clustering")),
+                ("plain_text", t_key!("model-entry", "tasks.plain_text")),
+            ])
+            .default("retrieval_query")
+            .order(0)
+            .build(),
+            SchemaBuilder::text(
+                "template",
+                t_key!("model-entry", "fields.task_templates.template.label"),
+                t_key!("model-entry", "fields.task_templates.template.desc"),
+            )
+            .default("{0}")
+            .order(1)
+            .build(),
+        ])
+        .default(serde_json::json!([]))
+        .order(13)
         .visible_when("kind", "embedding")
         .build(),
     ]);
@@ -279,13 +325,16 @@ impl Configurable for ModelOpenAiConfigComponent {
     }
 
     async fn apply_settings(&self, settings: Value) -> Result<(), ConfigError> {
-        let parsed: ModelOpenAiSettings = serde_json::from_value(settings).unwrap_or_else(|e| {
-            warn!(
-                "failed to parse settings for {}, using defaults: {e}",
-                self.component_id()
-            );
-            ModelOpenAiSettings::default()
-        });
+        let mut parsed: ModelOpenAiSettings =
+            serde_json::from_value(settings).unwrap_or_else(|e| {
+                warn!(
+                    "failed to parse settings for {}, using defaults: {e}",
+                    self.component_id()
+                );
+                ModelOpenAiSettings::default()
+            });
+        // 匹配内置模型档案时自动勾选能力并填充任务模板（用户显式配置不覆盖）。
+        crate::core::model::model_profiles::apply_profiles_to_entries(&mut parsed.models);
         *self.settings.write() = parsed;
         Ok(())
     }
@@ -396,7 +445,7 @@ mod tests {
         assert_eq!(embedding_json["ui"]["widget"]["kind"], "multiselect");
         assert_eq!(
             embedding_json["schema"]["items"]["enum"],
-            serde_json::json!(["title", "taskType", "outputDimensions"])
+            serde_json::json!(["taskType", "outputDimensions"])
         );
         assert_eq!(
             embedding_json["schema"]["default"],

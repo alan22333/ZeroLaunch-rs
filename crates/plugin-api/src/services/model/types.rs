@@ -57,9 +57,6 @@ pub enum ChatCapability {
 /// 消费者按能力传参；能力不匹配的请求返回 `ModelError::InvalidRequest`，不静默忽略。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EmbeddingCapability {
-    /// 支持标题+正文输入（`titles` 与 `input` 一一对应）。
-    #[serde(rename = "title")]
-    Title,
     /// 支持匹配模式（`task_type`: retrieval_document / retrieval_query 等）。
     #[serde(rename = "taskType")]
     TaskType,
@@ -216,9 +213,10 @@ pub struct ModelEmbeddingRequest {
     /// 待向量化文本列表；缺失时使用空列表。
     #[serde(rename = "input", default)]
     pub input: Vec<String>,
-    /// 与 input 一一对应的文档标题；None 表示不携带标题。
-    #[serde(rename = "titles", default)]
-    pub titles: Option<Vec<String>>,
+    /// 与 input 一一对应的模板填充参数（每个 input 一个参数列表，按模板占位符顺序填充，
+    /// 不含 text——text 由 input 提供）；None 表示模板无额外变量。
+    #[serde(rename = "templateArgs", default)]
+    pub template_args: Option<Vec<Vec<String>>>,
     /// 匹配模式；None 表示不指定任务类型。
     #[serde(rename = "taskType", default)]
     pub task_type: Option<String>,

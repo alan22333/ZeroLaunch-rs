@@ -686,6 +686,18 @@
         "embedding_capabilities": {
           "label": "Embedding 能力",
           "desc": "选择该模型支持的输入与输出能力；只有勾选的能力会被使用"
+        },
+        "task_templates": {
+          "label": "任务模板",
+          "desc": "语义任务对应的输入模板；{0} = 输入文本，{1}+ = 请求模板参数按顺序填充。留空使用内置模型规则",
+          "task": {
+            "label": "语义任务",
+            "desc": "跨模型统一的语义任务类型"
+          },
+          "template": {
+            "label": "模板",
+            "desc": "输入模板，{0} = 输入文本，{1}+ = 模板参数顺序填充"
+          }
         }
       },
       "kinds": {
@@ -705,9 +717,16 @@
       },
       "capabilities": {
         "reasoning": "深度思考 (reasoning)",
-        "title": "标题输入 (title)",
         "task_type": "任务类型提示 (taskType)",
         "output_dimensions": "输出维度裁剪 (outputDimensions)"
+      },
+      "tasks": {
+        "retrieval_document": "检索文档",
+        "retrieval_query": "检索查询",
+        "semantic_similarity": "语义相似度",
+        "classification": "分类",
+        "clustering": "聚类",
+        "plain_text": "裸文本直传（无模板）"
       }
     },
     "hotkey-config": {
