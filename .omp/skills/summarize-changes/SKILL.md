@@ -82,7 +82,15 @@ description: 总结当前代码更改，生成结构化的 commit message 或变
      - 无法归入单一领域（均匀分布在 3+ 互不相关目录的杂项改动）→ 省略 scope。
      - 禁止组合型 scope（如 `config-i18n`）。
 
+6.5. **行长度校验**：将生成的 commit message 通过管道送入 `.omp/skills/summarize-changes/lint-commit.sh` 检测：
+   - 命令：`printf '<commit message>' | bash .omp/skills/summarize-changes/lint-commit.sh`（或 heredoc 方式传入）。
+   - 脚本自动检测：首行（header）≤72 字符、其余行（body）≤100 字符，超限时打印违规行号、字符数与内容并退出码 1。
+   - 退出码 0 → 合规，进入步骤 7；退出码 1 → 按报错行压缩措辞，**重新生成** commit message 后再次校验，直至通过。
+   - 脚本按 Unicode 字符计数（perl 实现），中文按字符而非字节，跨平台（Git Bash / MSYS2 / WSL / macOS / Linux）行为一致。
+
 7. **输出结果**：展示给用户，不执行 `git commit`。
+
+
 
 ## 输出示例
 
