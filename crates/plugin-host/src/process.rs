@@ -171,6 +171,11 @@ impl PluginProcess {
         let cl = client.clone();
         tokio::spawn(async move {
             while let Some(incoming) = incoming_request_rx.recv().await {
+                debug!(
+                    "处理插件请求: method={} params={}",
+                    incoming.method,
+                    zerolaunch_plugin_protocol::codec::summarize_value(&incoming.params)
+                );
                 let result = hc.handle_host_call(&incoming.method, incoming.params).await;
                 match result {
                     Ok(val) => {

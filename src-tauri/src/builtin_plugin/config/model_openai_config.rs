@@ -55,6 +55,26 @@ struct ModelItem {
     id: String,
 }
 
+/// 依据模型 id 判定是否为 embedding 模型。
+///
+/// OpenAI 兼容 API 的 `/models` 不返回能力标签，只能按命名约定启发式判断：
+/// 主流 embedding 模型 id 普遍包含 `embedding`/`embed`/`ada` 等特征词。
+/// 误判代价低：kind 可在模型条目里手动改回 chat。
+fn is_embedding_model_id(id: &str) -> bool {
+    let lowered = id.to_ascii_lowercase();
+    lowered.contains("embedding")
+        || lowered.contains("text-embed")
+        || lowered.contains("-embed-")
+        || lowered.contains("bge-")
+        || lowered.contains("m3e")
+        || lowered == "ada"
+        || lowered.starts_with("ada-")
+        || lowered.ends_with("-ada")
+        || lowered.contains("similarity")
+        || lowered.contains("rerank")
+        || lowered.contains("retrieval")
+}
+
 impl Default for ModelOpenAiConfigComponent {
     /// 使用默认连接配置创建 OpenAI 兼容配置组件。
     fn default() -> Self {
@@ -310,7 +330,13 @@ impl Configurable for ModelOpenAiConfigComponent {
                     .data
                     .into_iter()
                     .filter(|model| !model.id.is_empty())
-                    .map(|model| ModelEntryConfig::chat(&model.id))
+                    .map(|model| {
+                        if is_embedding_model_id(&model.id) {
+                            ModelEntryConfig::embedding(&model.id)
+                        } else {
+                            ModelEntryConfig::chat(&model.id)
+                        }
+                    })
                     .collect::<Vec<_>>();
                 Ok(serde_json::json!({ "models": models }))
             }
@@ -392,5 +418,28 @@ mod tests {
         .expect("minimal model response should deserialize");
         assert_eq!(response.data.len(), 1);
         assert_eq!(response.data[0].id, "deepseek-v4-flash");
+    }
+
+    /// 验证 embedding 模型 id 识别：常见命名归类为 embedding，chat 模型不误判。
+    #[test]
+    fn embedding_model_id_classification() {
+        for embedding_id in [
+            "text-embedding-3-small",
+            "text-embedding-ada-002",
+            "bge-m3",
+            "m3e-large",
+            "nomic-embed-text",
+        ] {
+            assert!(
+                is_embedding_model_id(embedding_id),
+                "{embedding_id} 应识别为 embedding"
+            );
+        }
+        for chat_id in ["gpt-4o-mini", "deepseek-v4-flash", "qwen3:8b"] {
+            assert!(
+                !is_embedding_model_id(chat_id),
+                "{chat_id} 不应识别为 embedding"
+            );
+        }
     }
 }

@@ -15,7 +15,6 @@ use tokio::sync::{mpsc, oneshot};
 use zerolaunch_plugin_api::services::model::{
     ModelChatRequest, ModelChatResponse, ModelEmbeddingRequest, ModelEmbeddingResponse, ModelInfo,
 };
-use zerolaunch_plugin_protocol::codec::encode_frame;
 
 use base64::Engine as _;
 
@@ -56,16 +55,15 @@ impl HostProxy {
 
         let payload = serde_json::to_vec(&request).map_err(|e| e.to_string())?;
 
-        // 编码为完整的 LSP Content-Length 帧，避免 header 和 body 交错
-        let frame = encode_frame(&payload);
-
         // Register pending response
         let (tx, rx) = oneshot::channel();
         self.pending.insert(id, tx);
 
-        // Send via the shared channel (write_task writes to stdout)
+        // Send via the shared channel (write_task writes to stdout).
+        // 注意：此处只投递干净 JSON，分帧统一由 write_task 完成，
+        // 若在此 encode_frame 会导致双重分帧（帧内嵌套帧），宿主无法解析。
         self.outbound_tx
-            .send(frame)
+            .send(payload)
             .await
             .map_err(|_| "write channel closed".to_string())?;
 
@@ -103,12 +101,12 @@ impl HostProxy {
             return;
         };
 
-        let frame = encode_frame(&payload);
         let (tx, _rx) = oneshot::channel(); // _rx 立即 drop → fire-and-forget
         self.pending.insert(id, tx);
 
-        // 非阻塞投递：通道满了则丢弃并清理 pending
-        if self.outbound_tx.try_send(frame).is_err() {
+        // 非阻塞投递：通道满了则丢弃并清理 pending。
+        // 同 send_request：只投递干净 JSON，分帧由 write_task 统一完成。
+        if self.outbound_tx.try_send(payload).is_err() {
             self.pending.remove(&id);
         }
     }
@@ -291,5 +289,69 @@ impl HostProxy {
             .send_request("host/resource.list", serde_json::json!({}))
             .await?;
         serde_json::from_value(result).map_err(|e| format!("parse resource list failed: {}", e))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_proxy() -> (Arc<HostProxy>, mpsc::Receiver<Vec<u8>>) {
+        let (tx, rx) = mpsc::channel::<Vec<u8>>(16);
+        let pending: Arc<DashMap<u64, oneshot::Sender<serde_json::Value>>> =
+            Arc::new(DashMap::new());
+        (Arc::new(HostProxy::new(pending, tx)), rx)
+    }
+
+    /// 回归测试：host/* 请求必须以**干净 JSON** 投递到 outbound 通道，
+    /// 分帧由 write_task 统一完成。
+    ///
+    /// 修复前 send_request/log_no_wait 在投递前先 encode_frame，
+    /// 导致双重分帧（帧内嵌帧）：写出的字节为
+    /// `Content-Length: M\r\n\r\nContent-Length: N\r\n\r\n{JSON}`，
+    /// 宿主 read_frame 后 body 以 `Content-Length:` 开头，serde_json 解析失败
+    /// （`expected value at line 1 column 1`），host/* 调用全部超时。
+    #[tokio::test]
+    async fn send_request_posts_clean_json_without_embedded_frame() {
+        let (proxy, mut rx) = make_proxy();
+
+        // log_no_wait 是同步 fire-and-forget：直接检查通道里的字节。
+        proxy.log_no_wait("warn", "test message");
+        let bytes = rx.recv().await.expect("log_no_wait 应投递一条消息");
+        let text = String::from_utf8(bytes.clone()).expect("UTF-8");
+        assert!(
+            !text.contains("Content-Length"),
+            "outbound 通道中的消息不得包含帧头（双重分帧）: {:?}",
+            text
+        );
+        // 必须是合法 JSON-RPC 消息
+        let v: serde_json::Value = serde_json::from_slice(&bytes).expect("干净 JSON 可解析");
+        assert_eq!(v["method"], "host/log");
+        assert_eq!(v["params"]["message"], "test message");
+    }
+
+    /// send_request 投递的也必须是干净 JSON（await 路径）。
+    #[tokio::test]
+    async fn send_request_await_path_posts_clean_json() {
+        let (proxy, mut rx) = make_proxy();
+        // send_request 会 await 响应（oneshot 永不完成→挂起），
+        // 因此只在通道上取一条消息验证负载，然后丢弃任务。
+        let task = tokio::spawn(async move {
+            let _ = proxy.model_list().await; // 挂起直到超时（30s），任务随测试结束
+        });
+        let bytes = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("send_request 应投递一条消息")
+            .expect("通道未关闭");
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(
+            !text.contains("Content-Length"),
+            "outbound 通道中的消息不得包含帧头（双重分帧）: {:?}",
+            text
+        );
+        let v: serde_json::Value = serde_json::from_slice(&bytes).expect("干净 JSON 可解析");
+        assert_eq!(v["method"], "host/model.list");
+        // 清理：中止挂起的任务
+        task.abort();
     }
 }

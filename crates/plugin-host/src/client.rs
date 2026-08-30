@@ -17,6 +17,7 @@ use crate::transport::codec;
 ///
 /// Responses are sent via `JsonRpcClient::respond_ok` / `respond_err`,
 /// which write through the outbound channel.
+#[derive(Debug)]
 pub struct IncomingRequest {
     pub id: u64,
     pub method: String,
@@ -75,13 +76,29 @@ impl JsonRpcClient {
                     }
                 };
 
+                debug!(
+                    "收到插件原始帧 ({} bytes): {:?}",
+                    frame.len(),
+                    String::from_utf8_lossy(&frame)
+                );
+
                 let msg: Message = match serde_json::from_slice(&frame) {
                     Ok(m) => m,
                     Err(e) => {
-                        warn!("Failed to parse JSON-RPC message: {}", e);
+                        warn!(
+                            "Failed to parse JSON-RPC message: {}; raw frame ({} bytes): {:?}",
+                            e,
+                            frame.len(),
+                            String::from_utf8_lossy(&frame)
+                        );
                         continue;
                     }
                 };
+                debug!(
+                    "收到插件消息 ({} bytes): {:?}",
+                    frame.len(),
+                    zerolaunch_plugin_protocol::codec::summarize_message(&msg)
+                );
 
                 match msg {
                     Message::Response(resp) => {
@@ -136,6 +153,10 @@ impl JsonRpcClient {
             let mut writer = writer;
             let mut rx = outbound_rx;
             while let Some(msg) = rx.recv().await {
+                debug!(
+                    "发送给插件的消息: {:?}",
+                    zerolaunch_plugin_protocol::codec::summarize_message(&msg)
+                );
                 let payload = match serde_json::to_vec(&msg) {
                     Ok(p) => p,
                     Err(e) => {

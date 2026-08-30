@@ -21,7 +21,9 @@ use zerolaunch_plugin_api::{
     ActionExecutor, CachedCandidateData, DataSource, KeywordInjector, KeywordOptimizer, Plugin,
     ScoreBooster, SearchEngine,
 };
-use zerolaunch_plugin_protocol::codec::{encode_frame, MAX_FRAME_SIZE, MAX_HEADER_SIZE};
+use zerolaunch_plugin_protocol::codec::{
+    encode_frame, summarize_message, MAX_FRAME_SIZE, MAX_HEADER_SIZE,
+};
 use zerolaunch_plugin_protocol::jsonrpc::{Message, Request, Response};
 use zerolaunch_plugin_protocol::messages::*;
 use zerolaunch_plugin_protocol::methods::plugin as plugin_methods;
@@ -30,16 +32,18 @@ use zerolaunch_plugin_protocol::{codes, JsonRpcError, PROTOCOL_VERSION};
 use crate::host_proxy::HostProxy;
 use crate::logging;
 
-// Tokio task-local HostProxy，由 `run()` 初始化。
-// 在 `run_async` scope 内 spawn 的所有任务都继承该值。
-tokio::task_local! {
-    static HOST_PROXY: Arc<HostProxy>;
-}
+use std::sync::OnceLock;
 
-/// 返回当前 `run()` scope 内的 task-local `HostProxy`。
-/// 在 `run()` 之外调用会 panic。
+// 全局 HostProxy，由 `run_async` 初始化。
+static HOST_PROXY: OnceLock<Arc<HostProxy>> = OnceLock::new();
+
+/// 返回当前运行时的 `HostProxy`。
+/// 在 `run()` 之前调用会 panic。
 pub fn host() -> Arc<HostProxy> {
-    HOST_PROXY.with(|h| h.clone())
+    HOST_PROXY
+        .get()
+        .expect("host() 必须在 run() 之后调用")
+        .clone()
 }
 
 /// 从 read task 路由到 dispatch task 的入站 JSON-RPC 请求。
@@ -240,123 +244,156 @@ async fn run_async(mut app: PluginApp) {
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<Vec<u8>>(64);
     let pending: Arc<DashMap<u64, oneshot::Sender<serde_json::Value>>> = Arc::new(DashMap::new());
 
-    // 创建 HostProxy。当 scope 退出时，HOST_PROXY 被 drop，
-    // 从而释放 outbound_tx 的最后一个 clone，让 write task
-    // 通过 channel 关闭优雅退出。
+    // 创建 HostProxy 并写入全局，供 dispatch/read/write 三任务共享访问。
     let host_proxy = Arc::new(HostProxy::new(pending.clone(), outbound_tx.clone()));
-    let hp_for_logs = host_proxy.clone();
+    let _ = HOST_PROXY.set(host_proxy);
+    let hp_for_logs = HOST_PROXY.get().expect("HOST_PROXY 已设置").clone();
 
-    HOST_PROXY
-        .scope(host_proxy, async move {
-            // 插件状态
-            let mut plugin_context: Option<zerolaunch_plugin_api::PluginContext> = None;
+    // 插件状态
+    let mut plugin_context: Option<zerolaunch_plugin_api::PluginContext> = None;
 
-            // --- 日志转发后台任务：将 WARN/ERROR 非阻塞转发到宿主 ---
-            tokio::spawn(async move {
-                while let Some(entry) = log_rx.recv().await {
-                    hp_for_logs.log_no_wait(&entry.level, &entry.message);
+    // --- 日志转发后台任务：将 WARN/ERROR 非阻塞转发到宿主 ---
+    tokio::spawn(async move {
+        while let Some(entry) = log_rx.recv().await {
+            hp_for_logs.log_no_wait(&entry.level, &entry.message);
+        }
+    });
+
+    // --- 读任务：stdin → pending_map（响应）或 request_tx（新请求）---
+    let pending_r = pending.clone();
+    let request_tx_clone = request_tx.clone();
+    let mut read_handle = tokio::spawn(async move {
+        let reader = BufReader::new(stdin);
+        let mut stdin = reader;
+        while let Ok(body) = read_frame(&mut stdin).await {
+            tracing::debug!(
+                "收到宿主原始帧 ({} bytes): {:?}",
+                body.len(),
+                String::from_utf8_lossy(&body)
+            );
+            let msg: Message = match serde_json::from_slice(&body) {
+                Ok(m) => m,
+                Err(e) => {
+                    tracing::debug!(
+                        "解析宿主消息失败: {}; raw frame: {:?}",
+                        e,
+                        String::from_utf8_lossy(&body)
+                    );
+                    continue;
                 }
-            });
-
-
-            // --- 读任务：stdin → pending_map（响应）或 request_tx（新请求）---
-            let pending_r = pending.clone();
-            let request_tx_clone = request_tx.clone();
-            let read_handle = tokio::spawn(async move {
-                let reader = BufReader::new(stdin);
-                let mut stdin = reader;
-                while let Ok(body) = read_frame(&mut stdin).await {
-                    let msg: Message = match serde_json::from_slice(&body) {
-                        Ok(m) => m,
-                        Err(_) => continue,
-                    };
-                    match msg {
-                        Message::Response(resp) => {
-                            if let Some((_, tx)) = pending_r.remove(&resp.id) {
-                                let result = resp
-                                    .result
-                                    .or(resp
-                                        .error
-                                        .map(|e| serde_json::Value::String(e.message)))
-                                    .unwrap_or(serde_json::Value::Null);
-                                let _ = tx.send(result);
-                            } else {
-                                // 如果没有对应的 pending channel，说明响应已经超时或被取消，忽略。同时打印一下被忽略的信息
-                                tracing::warn!(
-                                    "收到未知的响应 id={}，可能已超时或被取消: {:?}",
-                                    resp.id,
-                                    resp
-                                );
-                            }
-                        }
-                        Message::Request(req) => {
-                            let ret = request_tx_clone
-                                .send(IncomingRequest {
-                                    id: req.id,
-                                    method: req.method,
-                                    params: req.params,
-                                })
-                                .await;
-                            // 如果 dispatch task 已退出，说明插件可能已经崩溃或被关闭，无法处理请求。打印警告信息。
-                            if ret.is_err() {
-                                tracing::warn!(
-                                    "无法将请求发送到 dispatch task，可能 dispatch task 已退出: {:?}",
-                                    ret
-                                );
-                            }
-                        }
-                        Message::Notification(_) => {
-                            tracing::trace!("忽略通知");
-                        }
+            };
+            tracing::debug!(
+                "收到宿主消息 ({} bytes): {:?}",
+                body.len(),
+                summarize_message(&msg)
+            );
+            match msg {
+                Message::Response(resp) => {
+                    if let Some((_, tx)) = pending_r.remove(&resp.id) {
+                        let result = resp
+                            .result
+                            .or(resp.error.map(|e| serde_json::Value::String(e.message)))
+                            .unwrap_or(serde_json::Value::Null);
+                        let _ = tx.send(result);
+                    } else {
+                        // 如果没有对应的 pending channel，说明响应已经超时或被取消，忽略。同时打印一下被忽略的信息
+                        tracing::warn!(
+                            "收到未知的响应 id={}，可能已超时或被取消: {:?}",
+                            resp.id,
+                            resp
+                        );
                     }
                 }
-            });
-
-            // --- 分发任务：plugin/* 请求 → 用户 Plugin → 响应到 outbound_tx ---
-            let outbound_dispatch = outbound_tx.clone();
-            let dispatch_handle = tokio::spawn(async move {
-                while let Some(incoming) = request_rx.recv().await {
-                    let req = Request::new(incoming.id, &incoming.method, incoming.params);
-                    // 收到了一个请求，调用用户实现的 Plugin trait 处理，并将响应发送到 outbound_tx。
-                    let result = handle_request(&mut app, &req, &mut plugin_context).await;
-                    if let Ok(payload) = serde_json::to_vec(&result) {
-                        if outbound_dispatch.send(payload).await.is_err() {
-                            break;
-                        }
+                Message::Request(req) => {
+                    let ret = request_tx_clone
+                        .send(IncomingRequest {
+                            id: req.id,
+                            method: req.method,
+                            params: req.params,
+                        })
+                        .await;
+                    // 如果 dispatch task 已退出，说明插件可能已经崩溃或被关闭，无法处理请求。打印警告信息。
+                    if ret.is_err() {
+                        tracing::warn!(
+                            "无法将请求发送到 dispatch task，可能 dispatch task 已退出: {:?}",
+                            ret
+                        );
                     }
                 }
-            });
-
-            // --- 写任务：outbound_rx → stdout ---
-            let write_handle = tokio::spawn(async move {
-                let mut writer = stdout;
-                while let Some(payload) = outbound_rx.recv().await {
-                    let frame = encode_frame(&payload);
-                    if writer.write_all(&frame).await.is_err() {
-                        break;
-                    }
-                    if writer.flush().await.is_err() {
-                        break;
-                    }
+                Message::Notification(_) => {
+                    tracing::trace!("忽略通知");
                 }
-            });
+            }
+        }
+    });
 
-            // 等待读任务结束（传输层关闭）。
-            let _ = read_handle.await;
+    // --- 分发任务：plugin/* 请求 → 用户 Plugin → 响应到 outbound_tx ---
+    let outbound_dispatch = outbound_tx.clone();
+    let mut dispatch_handle = tokio::spawn(async move {
+        while let Some(incoming) = request_rx.recv().await {
+            let req = Request::new(incoming.id, &incoming.method, incoming.params);
+            tracing::debug!(
+                "dispatch 收到请求: {:?}",
+                summarize_message(&Message::Request(req.clone()))
+            );
+            // 调用用户实现的 Plugin trait 处理，并将响应发送到 outbound_tx。
+            let result = handle_request(&mut app, &req, &mut plugin_context).await;
+            if let Ok(payload) = serde_json::to_vec(&result) {
+                if outbound_dispatch.send(payload).await.is_err() {
+                    tracing::warn!(
+                        "dispatch 发送响应失败（outbound channel 关闭），dispatch task 退出"
+                    );
+                    break;
+                }
+            } else {
+                tracing::error!("dispatch 序列化响应失败，请求被丢弃");
+            }
+        }
+        tracing::warn!("dispatch task 退出（request channel 关闭或发送失败）");
+    });
 
+    // --- 写任务：outbound_rx → stdout ---
+    let write_handle = tokio::spawn(async move {
+        let mut writer = stdout;
+        while let Some(payload) = outbound_rx.recv().await {
+            match serde_json::from_slice::<Message>(&payload) {
+                Ok(msg) => tracing::debug!("发送给宿主的消息: {:?}", summarize_message(&msg)),
+                Err(e) => tracing::debug!(
+                    "发送给宿主的原始负载 ({} bytes, 解析失败: {}): {:?}",
+                    payload.len(),
+                    e,
+                    String::from_utf8_lossy(&payload)
+                ),
+            }
+            let frame = encode_frame(&payload);
+            if writer.write_all(&frame).await.is_err() {
+                break;
+            }
+            if writer.flush().await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // 等待读任务结束（传输层关闭），或 dispatch task 崩溃（插件代码 panic）。
+    tokio::select! {
+        // 正常退出：stdin 关闭（宿主 shutdown / EOF）→ 读任务结束。
+        _ = &mut read_handle => {
             // 释放 request_tx → dispatch_task 在当前请求处理完后
             // 通过 channel 关闭优雅退出。
             drop(request_tx);
-
-            // 写任务无法通过 channel 关闭退出，因为
-            // HOST_PROXY（在此 scope 内）仍持有
-            // outbound_tx 的 clone，因此直接 abort。
+            // 写任务无法通过 channel 关闭退出，因为 HOST_PROXY 全局
+            // 仍持有 outbound_tx 的 clone，因此直接 abort。
             write_handle.abort();
-
-            let _ = tokio::join!(dispatch_handle, write_handle);
-        })
-        .await;
-    // HOST_PROXY scope 在此结束 → Arc<HostProxy> 释放 → 最终清理。
+            let _ = (&mut dispatch_handle).await;
+        }
+        // 插件代码 panic：dispatch task 死亡，进程退出由宿主按 auto_restart 重启。
+        r = &mut dispatch_handle => {
+            if r.is_err() {
+                tracing::error!("dispatch task 因 panic 退出，插件进程终止（宿主将按 auto_restart 重启）");
+            }
+        }
+    }
 }
 
 /// 读取单条 LSP 风格 Content-Length 帧消息。

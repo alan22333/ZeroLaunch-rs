@@ -27,6 +27,12 @@ impl HostCallHandler for TauriHostCallHandler {
         method: &str,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, JsonRpcError> {
+        tracing::debug!(
+            "收到插件 host/* 调用: plugin={} method={} params={}",
+            self.plugin_id,
+            method,
+            zerolaunch_plugin_protocol::codec::summarize_value(&params)
+        );
         use serde_json::from_value;
         use zerolaunch_plugin_protocol::methods::host;
 
