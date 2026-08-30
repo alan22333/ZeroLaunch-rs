@@ -51,29 +51,7 @@ impl PluginInstaller {
         let file = std::fs::File::open(zip_path)?;
         let mut archive = zip::ZipArchive::new(file)?;
 
-        // 第一遍：找 manifest + 收集所有条目名（用于计算公共前缀）
-        let mut manifest_content = String::new();
-        let mut find_manifest = false;
-        let mut names = Vec::new();
-        for i in 0..archive.len() {
-            let mut entry = archive.by_index(i)?;
-            let name = entry.name().to_string();
-            if name == "manifest.toml" {
-                entry.read_to_string(&mut manifest_content)?;
-                find_manifest = true;
-            }
-            names.push(name);
-        }
-
-        if !find_manifest {
-            return Err(InstallError::Manifest(format!(
-                "manifest.toml not found in zip: {}",
-                zip_path.to_string_lossy()
-            )));
-        }
-
-        let manifest: Manifest = toml::from_str(&manifest_content)
-            .map_err(|e| InstallError::Manifest(format!("invalid manifest: {}", e)))?;
+        let (manifest, names) = read_zip_manifest(zip_path, &mut archive)?;
 
         let plugin_id = &manifest.plugin.id;
         // 先用反向域名正则校验 ID 再拼装目标目录：恶意 ID（如含 `/`/`..`）会让
@@ -134,13 +112,29 @@ impl PluginInstaller {
 
         verify_install_dir(&target_dir)?;
 
-        debug!(
-            "Extracted plugin {} files to {} (manifest validation happens at load)",
-            plugin_id,
-            target_dir.display()
-        );
-
         Ok(target_dir)
+    }
+
+    /// 解析安装源的插件 id（覆盖安装前判断目标目录是否已存在）。
+    /// zip：读取 manifest.toml；目录：读取 <dir>/manifest.toml。
+    pub(crate) fn plugin_id_of(&self, source_path: &Path) -> Result<String, InstallError> {
+        if source_path.is_dir() {
+            let manifest_path = source_path.join("manifest.toml");
+            if !manifest_path.exists() {
+                return Err(InstallError::Manifest(
+                    "manifest.toml not found in source directory".into(),
+                ));
+            }
+            let content = std::fs::read_to_string(&manifest_path)?;
+            let manifest: Manifest = toml::from_str(&content)
+                .map_err(|e| InstallError::Manifest(format!("invalid manifest: {}", e)))?;
+            Ok(manifest.plugin.id)
+        } else {
+            let file = std::fs::File::open(source_path)?;
+            let mut archive = zip::ZipArchive::new(file)?;
+            let (manifest, _) = read_zip_manifest(source_path, &mut archive)?;
+            Ok(manifest.plugin.id)
+        }
     }
 
     /// 从目录复制安装插件到 `plugins_dir/<plugin_id>/`。
@@ -181,13 +175,45 @@ impl PluginInstaller {
 /// 必须在 `plugins_dir.join(plugin_id)` 之前调用：install 路径在 load 阶段
 /// 之前不会校验 manifest，含 `/`/`..` 的恶意 ID 会让 join/create_dir_all
 /// 逃出 plugins_dir，且回滚 `remove_dir_all` 会删除逃逸目录。
-fn validate_plugin_id(id: &str) -> Result<(), InstallError> {
+pub(crate) fn validate_plugin_id(id: &str) -> Result<(), InstallError> {
     static COMPILED_PLUGIN_ID_RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(PLUGIN_ID_RE).expect("PLUGIN_ID_RE 常量必须是合法正则"));
     if !COMPILED_PLUGIN_ID_RE.is_match(id) {
         return Err(InstallError::Manifest(format!("插件 ID 格式非法: {id}")));
     }
     Ok(())
+}
+
+/// 读取 zip 内 manifest.toml 与全部条目名（公共前缀计算所需）。
+/// 提取为独立函数：覆盖安装时需在解压前解析出 plugin_id 判断目标目录，
+/// 与 install_from_zip 复用同一「找 manifest + 收集条目」逻辑。
+fn read_zip_manifest(
+    zip_path: &Path,
+    archive: &mut zip::ZipArchive<std::fs::File>,
+) -> Result<(Manifest, Vec<String>), InstallError> {
+    let mut manifest_content = String::new();
+    let mut find_manifest = false;
+    let mut names = Vec::new();
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i)?;
+        let name = entry.name().to_string();
+        if name == "manifest.toml" {
+            entry.read_to_string(&mut manifest_content)?;
+            find_manifest = true;
+        }
+        names.push(name);
+    }
+
+    if !find_manifest {
+        return Err(InstallError::Manifest(format!(
+            "manifest.toml not found in zip: {}",
+            zip_path.to_string_lossy()
+        )));
+    }
+
+    let manifest: Manifest = toml::from_str(&manifest_content)
+        .map_err(|e| InstallError::Manifest(format!("invalid manifest: {}", e)))?;
+    Ok((manifest, names))
 }
 
 /// 校验安装目录内无符号链接和路径遍历（使用 walkdir 递归遍历）。

@@ -5,7 +5,7 @@ import { i18n, resolveText, type Locale } from '@/i18n'
 import { refreshPluginTranslations } from '@/stores/i18n-store'
 import {
   NButton, NDataTable, NTag, NSpace, NText, NModal, NSwitch,
-  NCode, NSpin, NEmpty, NDescriptions, NDescriptionsItem, useMessage,
+  NCode, NSpin, NEmpty, NDescriptions, NDescriptionsItem, useMessage, useDialog,
 } from 'naive-ui'
 import type { DataTableColumn } from 'naive-ui'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
@@ -23,6 +23,7 @@ import ComponentConfigLoader from '@/components/settings/ComponentConfigLoader.v
 
 const { t } = useI18n()
 const message = useMessage()
+const dialog = useDialog()
 const configStore = useConfigStore()
 
 /** 插件管理页统一行：内置与第三方插件合并展示，元数据均来自插件级数据（plugin_list）。 */
@@ -295,7 +296,7 @@ function handleChooseDir() {
   return chooseInstallSource(() => pickPluginDir(t('settings.thirdPartyPlugins.chooseDir')))
 }
 
-/** 确认安装：调用后端安装并刷新列表。 */
+/** 确认安装：调用后端安装并刷新列表。已安装时询问是否覆盖。 */
 async function handleInstall() {
   if (!pendingPath.value) return
   installing.value = true
@@ -308,7 +309,27 @@ async function handleInstall() {
   } catch (e) {
     const err = e as BridgeError
     if (err.code === 'ALREADY_INSTALLED') {
-      message.warning(t('settings.thirdPartyPlugins.alreadyInstalled'))
+      // 已安装：弹出覆盖确认，确认后以 overwrite 重试
+      dialog.warning({
+        title: t('settings.thirdPartyPlugins.overwriteDialogTitle'),
+        content: t('settings.thirdPartyPlugins.overwriteConfirmContent', { name: pendingFileName.value }),
+        positiveText: t('settings.thirdPartyPlugins.overwriteConfirmPositive'),
+        negativeText: t('settings.thirdPartyPlugins.installConfirmNegative'),
+        onPositiveClick: async () => {
+          installing.value = true
+          try {
+            await pluginInstallLocal(pendingPath.value, true)
+            message.success(t('settings.thirdPartyPlugins.installSuccess'))
+            showInstall.value = false
+            pendingPath.value = ''
+            await loadPlugins()
+          } catch (e2) {
+            message.error(t('settings.thirdPartyPlugins.installFailed') + ': ' + errorText(e2))
+          } finally {
+            installing.value = false
+          }
+        },
+      })
     } else if (err.code === 'COMPONENT_ID_COLLISION') {
       message.error(t('settings.thirdPartyPlugins.componentIdCollision') + ': ' + err.componentId)
     } else {

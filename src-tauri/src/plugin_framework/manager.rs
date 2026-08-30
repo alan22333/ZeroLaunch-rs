@@ -359,9 +359,13 @@ impl PluginManager {
 
     /// 从 .zip 文件或目录安装插件。
     /// 成功时发送 `plugin-installed` 事件。
+    ///
+    /// `overwrite=true` 时若同名插件已安装，先卸载旧版本（含子进程）再覆盖安装，
+    /// 供「已安装 → 再安装 → 确认覆盖」流程使用；否则已安装直接返回 AlreadyInstalled。
     pub async fn install(
         &self,
         source_path: &Path,
+        overwrite: bool,
         app_handle: Arc<AppHandle>,
     ) -> Result<InstalledPluginInfo, PluginManagerError> {
         if !source_path.exists() {
@@ -369,6 +373,48 @@ impl PluginManager {
                 "File not found: {}",
                 source_path.display()
             )));
+        }
+
+        // 覆盖安装：先解析插件 id，若目标已存在则先卸载旧版本（停进程 + 删目录）。
+        // 顺序与 uninstall 一致：先广播 PluginUnloaded 解注册 CM/SR，再 unload 子进程，
+        // 最后删目录，避免运行中文件句柄占用删除失败。
+        if overwrite {
+            let plugin_id = self
+                .installer()
+                .plugin_id_of(source_path)
+                .map_err(install_error_to_manager)?;
+            // 目标已存在判定：默认目录存在 或 注册记录含该 id（覆盖手动放置的异名目录插件）
+            let target_exists = self.plugins_dir().join(&plugin_id).exists()
+                || self.host_manager().plugins.contains_key(&plugin_id);
+            if target_exists {
+                info!("Overwriting plugin {}", plugin_id);
+                let hm = self.host_manager();
+                // 覆盖前从注册记录取真实旧目录（若已加载），未加载时回退默认目录名
+                let old_dir = hm
+                    .plugins
+                    .get(&plugin_id)
+                    .map(|a| a.plugin_dir.clone())
+                    .unwrap_or_else(|| hm.plugins_dir().join(&plugin_id));
+                if let Some(adapters) = hm.plugins.get(&plugin_id) {
+                    let adapters = adapters.clone();
+                    self.plugin_event_tx()
+                        .send(PluginRuntimeEvent::PluginUnloaded(adapters))
+                        .ok();
+                }
+                if let Err(e) = hm.unload(&plugin_id).await {
+                    error!("Unload during overwrite failed: {}", e);
+                }
+                if old_dir.exists() {
+                    std::fs::remove_dir_all(&old_dir).map_err(|e| {
+                        PluginManagerError::Internal(format!(
+                            "Cannot remove old plugin dir before overwrite: {}",
+                            e
+                        ))
+                    })?;
+                }
+                self.i18n_manager().unregister_plugin_catalog(&plugin_id);
+                self.host_api().unregister(&plugin_id);
+            }
         }
 
         let plugins_dir = self.plugins_dir();
@@ -393,9 +439,15 @@ impl PluginManager {
             .load_single_plugin(&installed_dir, app_handle.clone())
             .await
         {
-            // 回滚：加载失败（如组件 id 冲突）时删除已落盘的插件目录，
-            // 避免 UI 不可见、不可卸载、每次启动重试加载的残留目录。
+            // 回滚：加载失败（如组件 id 冲突）时先卸载已启动的子进程（停进程 +
+            // 清注册表），再删除已落盘的插件目录，避免进程残留 + Windows 文件句柄
+            // 占用导致删除失败、UI 不可见、每次启动重试加载的残留目录。
             // 进程退出后文件句柄可能延迟释放（Windows），重试一次仍失败则告警。
+            let plugin_id = self.installer().plugin_id_of(&installed_dir).ok();
+            if let Some(id) = plugin_id {
+                // 回滚清理：unload 内部已尽力停进程，失败仅记录日志
+                let _ = self.host_manager().unload(&id).await;
+            }
             if let Err(rm_err) = std::fs::remove_dir_all(&installed_dir) {
                 tokio::time::sleep(std::time::Duration::from_millis(150)).await;
                 if let Err(rm_err2) = std::fs::remove_dir_all(&installed_dir) {
@@ -476,7 +528,8 @@ impl PluginManager {
                 PluginManagerError::PluginNotFound(format!("Plugin not found: {}", plugin_id))
             })?
             .clone();
-        let plugin_dir = hm.plugins_dir().join(plugin_id);
+        // 从注册记录取真实安装目录，不依赖目录名 == plugin_id 的隐式契约
+        let plugin_dir = adapters.plugin_dir.clone();
 
         self.plugin_event_tx()
             .send(PluginRuntimeEvent::PluginUnloaded(adapters.clone()))
@@ -512,6 +565,14 @@ impl PluginManager {
 
         let hm = self.host_manager();
 
+        // 卸载前从注册记录取真实安装目录（unload 会移除注册，须提前捕获），
+        // 不依赖目录名 == plugin_id 的隐式契约；未加载时回退 plugins_dir.join(id) 清理残留。
+        let plugin_dir = hm
+            .plugins
+            .get(plugin_id)
+            .map(|a| a.plugin_dir.clone())
+            .unwrap_or_else(|| hm.plugins_dir().join(plugin_id));
+
         if let Some(adapters) = hm.plugins.get(plugin_id) {
             let adapters = adapters.clone();
             self.plugin_event_tx()
@@ -523,7 +584,6 @@ impl PluginManager {
             error!("Unload during uninstall failed: {}", e);
         }
 
-        let plugin_dir = hm.plugins_dir().join(plugin_id);
         if plugin_dir.exists() {
             std::fs::remove_dir_all(&plugin_dir).map_err(|e| {
                 PluginManagerError::Internal(format!("Cannot remove plugin dir: {}", e))

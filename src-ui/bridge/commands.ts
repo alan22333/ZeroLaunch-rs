@@ -276,8 +276,8 @@ export function pluginUninstall(pluginId: string): Promise<void> {
   return invokeCommand<void>('plugin_uninstall', { pluginId })
 }
 
-export function pluginInstallLocal(filePath: string): Promise<InstalledPluginInfo> {
-  return invokeCommand<InstalledPluginInfo>('plugin_install_local', { filePath })
+export function pluginInstallLocal(filePath: string, overwrite = false): Promise<InstalledPluginInfo> {
+  return invokeCommand<InstalledPluginInfo>('plugin_install_local', { filePath, overwrite })
 }
 
 export function pluginSetEnabled(pluginId: string, enabled: boolean): Promise<void> {

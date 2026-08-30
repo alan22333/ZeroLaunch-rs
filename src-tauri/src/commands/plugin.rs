@@ -105,11 +105,13 @@ pub async fn plugin_get_detail(
 }
 
 /// Install a plugin from a local .zip file or directory.
+/// `overwrite=true` 时若同名插件已安装则覆盖（先卸载旧版本）；否则已安装返回 ALREADY_INSTALLED。
 /// Emits `plugin-installed` on success.
 #[tauri::command]
 #[tracing::instrument(skip(state), fields(trace_id))]
 pub async fn plugin_install_local(
     file_path: String,
+    overwrite: bool,
     state: State<'_, Arc<AppState>>,
 ) -> Result<InstalledPluginInfo, BridgeError> {
     let trace_id = crate::utils::trace_id::generate_trace_id();
@@ -119,7 +121,7 @@ pub async fn plugin_install_local(
     let app_handle = state.get_main_handle();
 
     plugin_manager
-        .install(&path, app_handle)
+        .install(&path, overwrite, app_handle)
         .await
         .with_trace_id(&trace_id)
 }

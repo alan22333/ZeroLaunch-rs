@@ -45,10 +45,13 @@ pub struct PluginRegistration {
     pub plugin_id: String,
     /// 原始 manifest 全文快照
     pub manifest: Manifest,
+    /// 插件实际安装目录（load 时的真实路径，不依赖目录名 == plugin_id 的隐式契约）。
+    /// 卸载/重载/覆盖安装按此路径定位，而非 plugins_dir.join(plugin_id) 反查。
+    pub plugin_dir: PathBuf,
     /// 插件级元数据（插件自声明为基础，宿主覆盖 id/version/author/kind）。
     /// **唯一源**：与各 `RemoteComponentKind::Plugin` 共享同一 `Arc`，
     /// 由 build_components 一次性构造后不可变；任何字段覆盖只能发生在该函数内。
-    /// 供 build_plugin_info 直接取插件级 priority，避免组件最小优先级的双源。
+    /// 供 build_plugin_info 直接取插件级 priority，避免组件最小优先级双源。
     pub metadata: Arc<PluginMetadata>,
 
     /// 该插件的所有远程组件。
@@ -323,9 +326,10 @@ impl PluginHostManager {
         let init_result = match process.discover_components().await {
             Ok(result) => result,
             Err(e) => {
-                // 发现失败时清理登记
-                self.processes.remove(&plugin_id);
-                self.restart_contexts.remove(&plugin_id);
+                // 发现失败时清理登记并关闭已启动的子进程：watchdog 已独占
+                // Child 句柄（child_handle 为 None），kill_on_drop 不会触发，
+                // 只移除登记会让进程残留运行。teardown 关闭 stdin → 进程退出。
+                self.teardown(&plugin_id).await;
                 return Err(PluginLoadError::Protocol(e));
             }
         };
@@ -828,6 +832,8 @@ fn build_components(
     let registration = PluginRegistration {
         plugin_id: plugin_id.to_string(),
         manifest: manifest.clone(),
+        // 记录真实安装目录：卸载/重载按此定位，不依赖目录名 == plugin_id 契约
+        plugin_dir: plugin_dir.to_path_buf(),
         metadata: plugin_metadata,
         components,
     };

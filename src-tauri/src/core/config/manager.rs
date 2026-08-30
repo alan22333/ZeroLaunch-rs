@@ -682,6 +682,7 @@ mod tests {
         };
         let registration = PluginRegistration {
             plugin_id: "com.example.collide".into(),
+            plugin_dir: std::path::PathBuf::from("com.example.collide"),
             metadata: metadata.clone(),
             manifest: Manifest {
                 plugin: PluginSection {
