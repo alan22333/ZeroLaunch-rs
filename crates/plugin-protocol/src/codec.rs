@@ -29,34 +29,20 @@ pub fn encode_frame(payload: &[u8]) -> Vec<u8> {
 ///
 /// 启发式规则：
 /// - 长度超过阈值（64 字符）；
-/// - 包含至少一个数字；
-/// - 字符集高度偏向 base64 字母表（A-Za-z0-9+/=），
-///   且大量大写字母与/或 +/ 字符——普通文本/JSON 很少出现这种形态。
+/// - base64 字母表（A-Za-z0-9+/=）字符占比超过 98%——
+///   普通文本/JSON 含空格、标点与非 ASCII 字符，占比会显著更低。
 fn looks_like_base64(s: &str) -> bool {
     if s.len() <= 64 {
         return false;
     }
-    let mut alnum = 0usize;
-    let mut digits = 0usize;
-    let mut upper = 0usize;
-    let mut symbols = 0usize;
-    for c in s.chars() {
-        if c.is_ascii_alphanumeric() {
-            alnum += 1;
-        }
-        if c.is_ascii_digit() {
-            digits += 1;
-        }
-        if c.is_ascii_uppercase() {
-            upper += 1;
-        }
-        if matches!(c, '+' | '/' | '=') {
-            symbols += 1;
-        }
-    }
+    // base64 字母表（A-Za-z0-9+/=）覆盖绝大多数字符即判定为疑似二进制。
+    // 普通文本含空格、标点与非 ASCII 字符，占比会被显著拉低。
     let total = s.chars().count() as f64;
-    (digits > 0 && (alnum as f64 / total) > 0.95 && (upper as f64 / total) > 0.25)
-        || ((symbols as f64 / total) > 0.02 && (alnum as f64 / total) > 0.9)
+    let base64_chars = s
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '='))
+        .count() as f64;
+    base64_chars / total > 0.98
 }
 
 /// 将 JSON 值转换为适合 debug 日志展示的形式：
@@ -146,20 +132,23 @@ mod tests {
         assert_eq!(summarize_value(&json!(text)), json!(text));
     }
 
-    /// 嵌套结构中的长 base64 也应被摘要（对象/数组递归）。
+    /// 纯小写字母长串（无空格）是合法 base64 形态，应被摘要。
     #[test]
-    fn summarize_masks_nested_base64() {
-        let v = json!({
-            "meta": { "ok": true },
-            "data": [{"bytes": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]
-        });
-        let out = summarize_value(&v);
-        assert!(out["meta"]["ok"] == json!(true), "非二进制字段保持完整");
-        let masked = out["data"][0]["bytes"].as_str().unwrap();
+    fn summarize_masks_pure_lowercase_long_string() {
+        let s = "a".repeat(80);
+        let summarized = summarize_value(&json!(s));
+        let out = summarized.as_str().expect("仍是字符串");
         assert!(
-            masked.starts_with("<base64 len="),
-            "嵌套 base64 应被摘要: {}",
-            masked
+            out.starts_with("<base64 len="),
+            "纯小写长串应被摘要: {}",
+            out
         );
+    }
+
+    /// 带空格的英文长文本不算 base64，原样保留。
+    #[test]
+    fn summarize_keeps_long_english_with_spaces() {
+        let text = "the quick brown fox jumps over the lazy dog ".repeat(10);
+        assert_eq!(summarize_value(&json!(text)), json!(text));
     }
 }
