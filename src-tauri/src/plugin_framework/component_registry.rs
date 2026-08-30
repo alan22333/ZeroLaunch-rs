@@ -175,10 +175,11 @@ impl PluginComponentRegistry {
             .cloned()
             .collect();
 
-        enabled_engines
-            .into_iter()
-            .next()
-            .map(|engine| SearchPipeline::new(engine, enabled_boosters, top_k))
+        // 无引擎时返回透传管道：候选零分透传，排序完全由增强器决定。
+        match enabled_engines.into_iter().next() {
+            Some(engine) => Some(SearchPipeline::new(engine, enabled_boosters, top_k)),
+            None => Some(SearchPipeline::without_engine(enabled_boosters, top_k)),
+        }
     }
 }
 
@@ -244,7 +245,7 @@ mod tests {
             .build_search_pipeline(&cm, 10)
             .expect("存在启用的搜索引擎");
         assert_eq!(
-            pipeline.engine().component_id(),
+            pipeline.engine().expect("引擎存在").component_id(),
             "b-engine",
             "priority 最小者优先"
         );
@@ -256,7 +257,7 @@ mod tests {
             .build_search_pipeline(&cm, 10)
             .expect("存在启用的搜索引擎");
         assert_eq!(
-            pipeline2.engine().component_id(),
+            pipeline2.engine().expect("引擎存在").component_id(),
             "a-engine",
             "同 priority 按 component_id 字典序"
         );

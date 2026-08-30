@@ -1506,13 +1506,15 @@ impl SessionDispatcher {
             return;
         };
         let top_k = *self.last_top_k.read();
+        // build_search_pipeline 恒返回 Some：无引擎时返回透传管道（候选零分，仅增强器排序）。
         match self.components.build_search_pipeline(&cm, top_k) {
             Some(pipeline) => {
                 info!("搜索管道已重建 (top_k: {})", pipeline.top_k());
                 *self.search_pipeline.write() = Some(pipeline);
             }
             None => {
-                warn!("没有启用的搜索引擎，无法重建搜索管道");
+                // 防御分支：正常情况下不可达（build 恒 Some）。
+                warn!("搜索管道重建返回 None，保留原管道");
             }
         }
     }

@@ -1,21 +1,14 @@
-import { useMessage } from 'naive-ui'
 import { useConfigStore } from '../stores/config-store'
 import type { ComponentInfo } from '../bridge/contract'
 
 export function useSearchEngineToggle(getEngines: () => ComponentInfo[]) {
   const configStore = useConfigStore()
-  const message = useMessage()
 
   async function onToggle(componentId: string, val: boolean) {
     const engines = getEngines()
 
     if (!val) {
-      const enabledEngines = engines.filter(e => e.enabled)
-      if (enabledEngines.length <= 1 && enabledEngines[0]?.componentId === componentId) {
-        message.warning('必须至少保持一个检索引擎处于开启状态')
-        return
-      }
-
+      // 允许全部禁用：无引擎时后端搜索管道候选零分透传，仅由增强器排序。
       try {
         await configStore.setEnabled(componentId, false)
       } catch (e) {
