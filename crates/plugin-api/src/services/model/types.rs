@@ -240,6 +240,33 @@ pub struct ModelEmbeddingResponse {
     pub vectors: Vec<Vec<f32>>,
 }
 
+/// embedding 相似度请求：一个查询向量与多个目标向量两两计算相似度。
+///
+/// 向量必须同维度（由宿主校验）；维度不一致返回 InvalidRequest。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelSimilarityRequest {
+    /// 用于计算相似度的 embedding model id（仅用于取模型相似度公式）。
+    #[serde(rename = "modelId", default)]
+    pub model_id: String,
+    /// 查询向量（单个）。
+    #[serde(rename = "query", default)]
+    pub query: Vec<f32>,
+    /// 目标向量列表（与 query 两两计算，结果一一对应）。
+    #[serde(rename = "targets", default)]
+    pub targets: Vec<Vec<f32>>,
+}
+
+/// embedding 相似度响应：查询向量与每个目标向量的相似度（顺序与 targets 一致）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelSimilarityResponse {
+    /// 实际响应对应的 embedding model id。
+    #[serde(rename = "modelId", default)]
+    pub model_id: String,
+    /// 与 targets 一一对应的相似度列表。
+    #[serde(rename = "similarities", default)]
+    pub similarities: Vec<f32>,
+}
+
 /// 流式输出分块（宿主内部传播，不跨插件协议）。
 #[derive(Debug, Clone)]
 pub enum ModelStreamChunk {

@@ -131,6 +131,14 @@ impl crate::services::model::ModelService for StubModelService {
     {
         Err(crate::services::model::ModelError::NotSupported)
     }
+
+    async fn similarity(
+        &self,
+        _req: crate::services::model::ModelSimilarityRequest,
+    ) -> Result<crate::services::model::ModelSimilarityResponse, crate::services::model::ModelError>
+    {
+        Err(crate::services::model::ModelError::NotSupported)
+    }
 }
 
 // ===== Clipboard Manager =====

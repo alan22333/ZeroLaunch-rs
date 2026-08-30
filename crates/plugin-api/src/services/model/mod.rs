@@ -14,5 +14,6 @@ pub use service::ModelService;
 pub use types::{
     ChatCapability, EmbeddingCapability, ModelChatMessage, ModelChatRequest, ModelChatResponse,
     ModelChatRole, ModelEmbeddingRequest, ModelEmbeddingResponse, ModelError, ModelInfo, ModelKind,
-    ModelSimilarity, ModelStreamChunk, ModelTokenUsage,
+    ModelSimilarity, ModelSimilarityRequest, ModelSimilarityResponse, ModelStreamChunk,
+    ModelTokenUsage,
 };

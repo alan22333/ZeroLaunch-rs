@@ -1,11 +1,9 @@
-//! 宿主统一模型服务：聚合所有提供方模型清单，并按 model_id 路由调用。
-
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 use super::types::{
     ModelChatRequest, ModelChatResponse, ModelEmbeddingRequest, ModelEmbeddingResponse, ModelError,
-    ModelInfo, ModelStreamChunk,
+    ModelInfo, ModelSimilarityRequest, ModelSimilarityResponse, ModelStreamChunk,
 };
 
 /// 宿主统一模型服务：消费者（内置组件经 PluginHandle、第三方插件经 host/model.*）
@@ -35,4 +33,10 @@ pub trait ModelService: Send + Sync {
         &self,
         req: ModelEmbeddingRequest,
     ) -> Result<ModelEmbeddingResponse, ModelError>;
+
+    /// 查询向量与多个目标向量的相似度（按模型元数据公式计算，并行加速）。
+    async fn similarity(
+        &self,
+        req: ModelSimilarityRequest,
+    ) -> Result<ModelSimilarityResponse, ModelError>;
 }

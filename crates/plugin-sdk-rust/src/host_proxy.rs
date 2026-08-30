@@ -14,6 +14,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use zerolaunch_plugin_api::services::model::{
     ModelChatRequest, ModelChatResponse, ModelEmbeddingRequest, ModelEmbeddingResponse, ModelInfo,
+    ModelSimilarityRequest, ModelSimilarityResponse,
 };
 
 use base64::Engine as _;
@@ -206,6 +207,16 @@ impl HostProxy {
     ) -> Result<ModelEmbeddingResponse, String> {
         let params = serde_json::to_value(req).map_err(|e| e.to_string())?;
         let result = self.send_request("host/model.embedding", params).await?;
+        serde_json::from_value(result).map_err(|e| e.to_string())
+    }
+
+    /// 按 model_id 计算查询向量与多个目标向量的相似度。
+    pub async fn model_similarity(
+        &self,
+        req: ModelSimilarityRequest,
+    ) -> Result<ModelSimilarityResponse, String> {
+        let params = serde_json::to_value(req).map_err(|e| e.to_string())?;
+        let result = self.send_request("host/model.similarity", params).await?;
         serde_json::from_value(result).map_err(|e| e.to_string())
     }
 

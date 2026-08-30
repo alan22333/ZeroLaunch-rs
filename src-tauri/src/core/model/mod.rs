@@ -20,12 +20,13 @@ use crate::core::config::{ConfigEvent, ConfigManager};
 use async_trait::async_trait;
 use dashmap::DashMap;
 use parking_lot::RwLock;
+use rayon::prelude::*;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use zerolaunch_plugin_api::services::model::{
     EmbeddingCapability, ModelChatRequest, ModelChatResponse, ModelEmbeddingRequest,
     ModelEmbeddingResponse, ModelError, ModelInfo, ModelKind, ModelProvider, ModelService,
-    ModelStreamChunk,
+    ModelSimilarity, ModelSimilarityRequest, ModelSimilarityResponse, ModelStreamChunk,
 };
 
 /// OpenAI 兼容提供方的配置组件 id。
@@ -326,6 +327,77 @@ impl ModelService for ModelManager {
             vectors: ordered,
         })
     }
+
+    /// 查询向量与多个目标向量的相似度：按模型元数据 similarity 公式计算。
+    ///
+    /// 向量必须同维度（与 query 一致）；计算公式由模型元数据指定，
+    /// 目标向量两两独立，用 rayon 并行加速。非 embedding 模型返回 NotSupported。
+    async fn similarity(
+        &self,
+        req: ModelSimilarityRequest,
+    ) -> Result<ModelSimilarityResponse, ModelError> {
+        let model_info = self
+            .model_info(&req.model_id)
+            .ok_or_else(|| ModelError::ModelNotFound(req.model_id.clone()))?;
+        let ModelKind::Embedding { similarity, .. } = &model_info.kind else {
+            return Err(ModelError::NotSupported);
+        };
+        let similarity = *similarity;
+        let query = &req.query;
+        let dim = query.len();
+        if dim == 0 {
+            return Err(ModelError::InvalidRequest("查询向量为空".to_string()));
+        }
+        if req.targets.iter().any(|t| t.len() != dim) {
+            return Err(ModelError::InvalidRequest(
+                "目标向量维度与查询向量不一致".to_string(),
+            ));
+        }
+        let similarities: Vec<f32> = req
+            .targets
+            .par_iter()
+            .map(|target| match similarity {
+                ModelSimilarity::Cosine => cosine_similarity(query, target),
+                ModelSimilarity::DotProduct => dot_product(query, target),
+                ModelSimilarity::Euclidean => -euclidean_distance(query, target),
+            })
+            .collect();
+        Ok(ModelSimilarityResponse {
+            model_id: req.model_id,
+            similarities,
+        })
+    }
+}
+
+/// 余弦相似度（归一化向量即点积；维度不一致视为不相似 0）。
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() {
+        return 0.0;
+    }
+    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+}
+
+/// 点积（未归一化向量的相似度）。
+fn dot_product(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() {
+        return 0.0;
+    }
+    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+}
+
+/// 欧氏距离（用于 euclidean 相似度取负）。
+fn euclidean_distance(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() {
+        return f32::MAX;
+    }
+    a.iter()
+        .zip(b.iter())
+        .map(|(x, y)| {
+            let d = x - y;
+            d * d
+        })
+        .sum::<f32>()
+        .sqrt()
 }
 
 #[cfg(test)]
@@ -547,20 +619,101 @@ mod tests {
         assert!(matches!(err, ModelError::Transport(_)));
     }
 
+    /// 验证 similarity 按模型元数据公式计算：cosine 对单位向量等于点积。
     #[tokio::test]
-    async fn unknown_model_id_reports_model_not_found() {
+    async fn similarity_computes_cosine_for_embedding_model() {
         let registry = ModelManager::new();
+        registry.register_provider(Arc::new(StubProvider {
+            id: "embedding-pro",
+            models: vec![model(
+                "embedding-pro/m1",
+                ModelKind::Embedding {
+                    context_window: None,
+                    dimensions: Some(3),
+                    similarity: ModelSimilarity::Cosine,
+                    capabilities: vec![],
+                },
+            )],
+            chat_result: Err(ModelError::NotSupported),
+            embedding_result: Err(ModelError::NotSupported),
+            chat_calls: Arc::new(Default::default()),
+        }));
         registry.refresh_models().await;
-        let err = registry
-            .chat(ModelChatRequest {
-                model_id: "nope/m1".to_string(),
-                messages: vec![],
-                temperature: None,
-                max_tokens: None,
-                reasoning_effort: None,
+        let resp = registry
+            .similarity(ModelSimilarityRequest {
+                model_id: "embedding-pro/m1".to_string(),
+                query: vec![1.0, 0.0, 0.0],
+                targets: vec![
+                    vec![1.0, 0.0, 0.0],
+                    vec![0.0, 1.0, 0.0],
+                    vec![0.0, 0.0, -1.0],
+                ],
             })
             .await
-            .unwrap_err();
-        assert!(matches!(err, ModelError::ModelNotFound(_)));
+            .unwrap();
+        assert_eq!(resp.model_id, "embedding-pro/m1");
+        assert_eq!(resp.similarities.len(), 3);
+        assert!((resp.similarities[0] - 1.0).abs() < 1e-6);
+        assert!((resp.similarities[1]).abs() < 1e-6);
+        assert!((resp.similarities[2]).abs() < 1e-6);
+    }
+
+    /// 验证 similarity 拒绝 chat 模型与维度不一致向量。
+    #[tokio::test]
+    async fn similarity_rejects_non_embedding_and_mismatched_dims() {
+        let registry = ModelManager::new();
+        registry.register_provider(Arc::new(StubProvider {
+            id: "chat-pro",
+            models: vec![model(
+                "chat-pro/m1",
+                ModelKind::Chat {
+                    context_window: None,
+                    max_output: None,
+                    supports_stream: false,
+                    capabilities: vec![],
+                },
+            )],
+            chat_result: Err(ModelError::NotSupported),
+            embedding_result: Err(ModelError::NotSupported),
+            chat_calls: Arc::new(Default::default()),
+        }));
+        registry.refresh_models().await;
+        assert!(matches!(
+            registry
+                .similarity(ModelSimilarityRequest {
+                    model_id: "chat-pro/m1".to_string(),
+                    query: vec![1.0],
+                    targets: vec![vec![1.0]],
+                })
+                .await,
+            Err(ModelError::NotSupported)
+        ));
+        // embedding 模型但维度不一致
+        registry.register_provider(Arc::new(StubProvider {
+            id: "embedding-pro",
+            models: vec![model(
+                "embedding-pro/m1",
+                ModelKind::Embedding {
+                    context_window: None,
+                    dimensions: Some(2),
+                    similarity: ModelSimilarity::Cosine,
+                    capabilities: vec![],
+                },
+            )],
+            chat_result: Err(ModelError::NotSupported),
+            embedding_result: Err(ModelError::NotSupported),
+            chat_calls: Arc::new(Default::default()),
+        }));
+        registry.refresh_models().await;
+        assert!(matches!(
+            registry
+                .similarity(ModelSimilarityRequest {
+                    model_id: "embedding-pro/m1".to_string(),
+                    query: vec![1.0, 0.0],
+                    targets: vec![vec![1.0]],
+                })
+                .await,
+            Err(ModelError::InvalidRequest(_))
+        ));
     }
 }

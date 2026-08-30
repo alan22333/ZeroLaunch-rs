@@ -95,6 +95,8 @@ pub mod host {
     pub const MODEL_CHAT: &str = "host/model.chat";
     /// 按 model_id 调用文本向量化。
     pub const MODEL_EMBEDDING: &str = "host/model.embedding";
+    /// 按 model_id 计算查询向量与多个目标向量的相似度。
+    pub const MODEL_SIMILARITY: &str = "host/model.similarity";
 }
 
 /// Notification-only method names (fire-and-forget, no response expected).

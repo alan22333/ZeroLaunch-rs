@@ -248,6 +248,17 @@ impl HostCallHandler for TauriHostCallHandler {
                     .map_err(|e| JsonRpcError::new(codes::PLUGIN_ERROR, e.to_string()))?;
                 Ok(serde_json::to_value(resp).unwrap_or_default())
             }
+            // 按 model_id 计算查询向量与多个目标向量的相似度。
+            host::MODEL_SIMILARITY => {
+                let req: zerolaunch_plugin_api::services::model::ModelSimilarityRequest =
+                    from_value(params)
+                        .map_err(|e| JsonRpcError::new(codes::INVALID_PARAMS, e.to_string()))?;
+                let resp = handle
+                    .model_similarity(req)
+                    .await
+                    .map_err(|e| JsonRpcError::new(codes::PLUGIN_ERROR, e.to_string()))?;
+                Ok(serde_json::to_value(resp).unwrap_or_default())
+            }
             _ => Err(JsonRpcError::new(
                 codes::METHOD_NOT_FOUND,
                 format!("host method not found: {}", method),

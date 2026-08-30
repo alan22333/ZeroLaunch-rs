@@ -11,7 +11,7 @@ use crate::services::installation_monitor::types::InstallationCallback;
 use crate::services::installation_monitor::InstallationMonitor;
 use crate::services::model::{
     ModelChatRequest, ModelChatResponse, ModelEmbeddingRequest, ModelEmbeddingResponse, ModelError,
-    ModelInfo, ModelService,
+    ModelInfo, ModelService, ModelSimilarityRequest, ModelSimilarityResponse,
 };
 use crate::services::parameter::resolver::ParameterResolver;
 use crate::services::parameter::types::ParameterSnapshot;
@@ -379,6 +379,14 @@ impl PluginHandle {
         req: ModelEmbeddingRequest,
     ) -> Result<ModelEmbeddingResponse, ModelError> {
         self.model_service.embedding(req).await
+    }
+
+    /// 按 model_id 计算查询向量与多个目标向量的相似度。
+    pub async fn model_similarity(
+        &self,
+        req: ModelSimilarityRequest,
+    ) -> Result<ModelSimilarityResponse, ModelError> {
+        self.model_service.similarity(req).await
     }
 
     // ===== 参数解析服务 =====
