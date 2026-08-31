@@ -200,7 +200,7 @@ impl HostProxy {
         serde_json::from_value(result).map_err(|e| e.to_string())
     }
 
-    /// 按 model_id 调用文本向量化。
+    /// 按 model_id 调用文本向量化（task_type 必填，宿主对缺失/未知值返回错误）。
     pub async fn model_embedding(
         &self,
         req: ModelEmbeddingRequest,

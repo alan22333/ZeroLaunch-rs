@@ -13,33 +13,33 @@ pub enum ModelKind {
     #[serde(rename = "chat")]
     Chat {
         /// chat：上下文窗口大小（可选；None 表示提供方未声明）。
-        #[serde(rename = "contextWindow")]
+        #[serde(rename = "contextWindow", default)]
         context_window: Option<u32>,
         /// chat：单次最大输出 token（可选；None 表示提供方未声明）。
-        #[serde(rename = "maxOutput")]
+        #[serde(rename = "maxOutput", default)]
         max_output: Option<u32>,
         /// 是否支持流式输出（仅 chat 请求有流式概念）。
-        #[serde(rename = "supportsStream")]
+        #[serde(rename = "supportsStream", default)]
         supports_stream: bool,
         /// 支持的请求级可选能力清单（provider 如实声明，消费者按能力传参）。
-        #[serde(rename = "capabilities")]
+        #[serde(rename = "capabilities", default)]
         capabilities: Vec<ChatCapability>,
     },
     /// embedding（文本向量化）——由模型提供方声明，消费者按此路由 embedding 请求。
     #[serde(rename = "embedding")]
     Embedding {
         /// embedding：模型可接受的最大输入上下文长度（可选；None 表示提供方未声明）。
-        #[serde(rename = "contextWindow")]
+        #[serde(rename = "contextWindow", default)]
         context_window: Option<u32>,
         /// embedding：向量维度（可选；None 表示提供方未声明，用于校验向量一致性）。
-        #[serde(rename = "dimensions")]
+        #[serde(rename = "dimensions", default)]
         dimensions: Option<u32>,
         /// embedding 模型推荐的相似度计算方式（默认 Cosine）。
         #[serde(rename = "similarity")]
         #[serde(default)]
         similarity: ModelSimilarity,
         /// 支持的请求级可选能力清单（provider 如实声明，消费者按能力传参）。
-        #[serde(rename = "capabilities")]
+        #[serde(rename = "capabilities", default)]
         capabilities: Vec<EmbeddingCapability>,
     },
 }
@@ -57,9 +57,6 @@ pub enum ChatCapability {
 /// 消费者按能力传参；能力不匹配的请求返回 `ModelError::InvalidRequest`，不静默忽略。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EmbeddingCapability {
-    /// 支持匹配模式（`task_type`: retrieval_document / retrieval_query 等）。
-    #[serde(rename = "taskType")]
-    TaskType,
     /// 支持输出维度裁剪（`dimensions`，matryoshka 类模型）。
     #[serde(rename = "outputDimensions")]
     OutputDimensions,
@@ -68,7 +65,7 @@ pub enum EmbeddingCapability {
 /// embedding 模型推荐的 相似度计算方式（消费者按此选择公式；仅 embedding 模型有意义）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ModelSimilarity {
-    /// 余弦相似度；稠密 embedding 惯例（归一化向量与点积排序等价）。
+    /// 余弦相似度；稠密 embedding 惯例。
     #[default]
     #[serde(rename = "cosine")]
     Cosine,
@@ -204,6 +201,61 @@ pub struct ModelChatResponse {
     pub usage: Option<ModelTokenUsage>,
 }
 
+/// 单条 input 的模板填充参数——命名语义字段，字段名即模板占位符名。
+///
+/// 调用方只声明这条文本有什么元数据（如标题），不感知宿主如何拼模板；
+/// 模型档案模板通过命名占位符引用字段（如 gemma 文档侧 `title: {title:none} | text: {0}`），
+/// 未提供的字段按占位符默认值回退。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmbeddingTemplateArgs {
+    /// 文档标题（模板占位符 `{title}`）；None = 无标题。
+    #[serde(rename = "title", default)]
+    pub title: Option<String>,
+}
+
+/// 语义任务类型：跨模型统一的任务抽象，嵌入模型按此选择输入模板。
+///
+/// 序列化名为 IPC 契约中的 `taskType` 字符串（`ModelEmbeddingRequest.task_type`），
+/// 由类型系统强制只能传合法值——未知字符串在反序列化时直接失败，不进入宿主。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SemanticTask {
+    /// 检索文档（候选侧；多数模型裸传或加标题模板）。
+    #[serde(rename = "retrieval_document")]
+    RetrievalDocument,
+    /// 检索查询（查询侧；多数模型加任务前缀）。
+    #[serde(rename = "retrieval_query")]
+    RetrievalQuery,
+    /// 句子/文档语义相似度。
+    #[serde(rename = "semantic_similarity")]
+    SemanticSimilarity,
+    /// 文本分类。
+    #[serde(rename = "classification")]
+    Classification,
+    /// 文本聚类。
+    #[serde(rename = "clustering")]
+    Clustering,
+    /// 裸文本直传（无任务模板）：输入原样透传，不套任何前缀。
+    ///
+    /// 用于模板反而干扰语义的模型（如部分 qwen3-embedding 对泛化查询
+    /// 裸文本语义分更准）；等效于无模板裸传，但以显式任务声明通过契约校验。
+    #[serde(rename = "plain_text")]
+    PlainText,
+}
+
+impl SemanticTask {
+    /// 语义任务的序列化名（与 serde rename 一致）。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SemanticTask::RetrievalDocument => "retrieval_document",
+            SemanticTask::RetrievalQuery => "retrieval_query",
+            SemanticTask::SemanticSimilarity => "semantic_similarity",
+            SemanticTask::Classification => "classification",
+            SemanticTask::Clustering => "clustering",
+            SemanticTask::PlainText => "plain_text",
+        }
+    }
+}
+
 /// embedding 请求：批量向量化（输入列表，一一对应返回）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelEmbeddingRequest {
@@ -213,18 +265,18 @@ pub struct ModelEmbeddingRequest {
     /// 待向量化文本列表；缺失时使用空列表。
     #[serde(rename = "input", default)]
     pub input: Vec<String>,
-    /// 与 input 一一对应的模板填充参数（每个 input 一个参数列表，按模板占位符顺序填充，
-    /// 不含 text——text 由 input 提供）；None 表示模板无额外变量。
+    /// 与 input 一一对应的模板填充参数；长度不足的项视为无额外参数（多余项忽略）。
     #[serde(rename = "templateArgs", default)]
-    pub template_args: Option<Vec<Vec<String>>>,
-    /// 匹配模式；None 表示不指定任务类型。
-    #[serde(rename = "taskType", default)]
-    pub task_type: Option<String>,
+    pub template_args: Option<Vec<EmbeddingTemplateArgs>>,
+    /// 语义任务类型（枚举强制合法值）；宿主按模型档案翻译为输入模板。
+    #[serde(rename = "taskType")]
+    pub task_type: SemanticTask,
     /// 输出维度裁剪；None 表示使用模型原生维度。
     #[serde(rename = "dimensions", default)]
     pub dimensions: Option<u32>,
 }
-/// embedding 响应：与 input 一一对应的归一化向量。
+
+/// embedding 响应：与 input 一一对应的向量（是否归一化取决于 provider）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelEmbeddingResponse {
     /// 实际响应对应的 embedding model id。

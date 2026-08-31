@@ -289,13 +289,7 @@ impl ModelProvider for OllamaProvider {
         });
         let texts = compose_embedding_texts(
             &req.input,
-            req.task_type.as_deref(),
-            embedding_config
-                .map(|config| config.capabilities.as_slice())
-                .unwrap_or(&[]),
-            embedding_config
-                .map(|config| config.task_templates.as_slice())
-                .unwrap_or(&[]),
+            req.task_type,
             &req.model_id,
             req.template_args.as_deref(),
         )?;

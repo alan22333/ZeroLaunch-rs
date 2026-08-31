@@ -16,7 +16,7 @@ pub use settings::{
     ModelOpenAiSettings,
 };
 
-use self::compose::{require_embedding_capability, validate_embedding_request};
+use self::compose::require_embedding_capability;
 use crate::core::config::{ConfigEvent, ConfigManager};
 use async_trait::async_trait;
 use dashmap::DashMap;
@@ -25,9 +25,10 @@ use rayon::prelude::*;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use zerolaunch_plugin_api::services::model::{
-    EmbeddingCapability, ModelChatRequest, ModelChatResponse, ModelEmbeddingRequest,
-    ModelEmbeddingResponse, ModelError, ModelInfo, ModelKind, ModelProvider, ModelService,
-    ModelSimilarity, ModelSimilarityRequest, ModelSimilarityResponse, ModelStreamChunk,
+    EmbeddingCapability, EmbeddingTemplateArgs, ModelChatRequest, ModelChatResponse,
+    ModelEmbeddingRequest, ModelEmbeddingResponse, ModelError, ModelInfo, ModelKind, ModelProvider,
+    ModelService, ModelSimilarity, ModelSimilarityRequest, ModelSimilarityResponse,
+    ModelStreamChunk,
 };
 
 /// OpenAI 兼容提供方的配置组件 id。
@@ -187,14 +188,6 @@ impl ModelService for ModelManager {
         else {
             return Err(ModelError::NotSupported);
         };
-        validate_embedding_request(req.task_type.as_deref(), capabilities)?;
-        if let Some(args) = &req.template_args {
-            if args.len() != req.input.len() {
-                return Err(ModelError::InvalidRequest(
-                    "template_args 数量与 input 不一致".to_string(),
-                ));
-            }
-        }
         if req.dimensions.is_some() {
             require_embedding_capability(
                 capabilities,
@@ -209,7 +202,7 @@ impl ModelService for ModelManager {
         struct Miss {
             idx: usize,
             text: String,
-            args: Option<Vec<String>>,
+            args: Option<EmbeddingTemplateArgs>,
             key: [u8; 32],
         }
         let mut cached: Vec<(usize, Arc<Vec<f32>>)> = Vec::new();
@@ -219,14 +212,14 @@ impl ModelService for ModelManager {
                 let args = req
                     .template_args
                     .as_ref()
-                    .map(|args| args.get(idx).cloned().unwrap_or_default());
+                    .and_then(|args| args.get(idx).cloned());
                 let key = embedding_cache::compute_key(
                     &cache_namespace,
                     &ModelEmbeddingRequest {
                         model_id: req.model_id.clone(),
                         input: vec![text.clone()],
-                        template_args: args.as_ref().map(|a| vec![a.clone()]),
-                        task_type: req.task_type.clone(),
+                        template_args: args.clone().map(|a| vec![a]),
+                        task_type: req.task_type,
                         dimensions: req.dimensions,
                     },
                 );
@@ -274,13 +267,13 @@ impl ModelService for ModelManager {
             let sub = ModelEmbeddingRequest {
                 model_id: req.model_id.clone(),
                 input: misses.iter().map(|m| m.text.clone()).collect(),
-                template_args: req.template_args.as_ref().map(|_| {
+                template_args: Some(
                     misses
                         .iter()
                         .map(|m| m.args.clone().unwrap_or_default())
-                        .collect()
-                }),
-                task_type: req.task_type.clone(),
+                        .collect(),
+                ),
+                task_type: req.task_type,
                 dimensions: req.dimensions,
             };
             let resp = provider.embedding(sub).await?;
@@ -365,12 +358,22 @@ impl ModelService for ModelManager {
     }
 }
 
-/// 余弦相似度（归一化向量即点积；维度不一致视为不相似 0）。
+/// 余弦相似度（真余弦，不要求向量归一化；维度不一致视为不相似 0）。
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() {
         return 0.0;
     }
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+    let (dot, na, nb) = a
+        .iter()
+        .zip(b)
+        .fold((0f32, 0f32, 0f32), |(d, x, y), (u, v)| {
+            (d + u * v, x + u * u, y + v * v)
+        });
+    let denom = na.sqrt() * nb.sqrt();
+    if denom <= f32::EPSILON || !denom.is_finite() {
+        return 0.0;
+    }
+    dot / denom
 }
 
 /// 点积（未归一化向量的相似度）。
@@ -401,7 +404,7 @@ mod tests {
     use super::*;
     use zerolaunch_plugin_api::services::model::{
         ChatCapability, EmbeddingCapability, ModelChatRole, ModelKind, ModelSimilarity,
-        ModelTokenUsage,
+        ModelTokenUsage, SemanticTask,
     };
 
     /// 记录型桩提供方：按构造参数返回固定模型清单与调用结果。
@@ -607,7 +610,7 @@ mod tests {
                 model_id: "embedding-pro/m1".to_string(),
                 input: vec!["text".to_string()],
                 template_args: None,
-                task_type: None,
+                task_type: SemanticTask::RetrievalDocument,
                 dimensions: None,
             })
             .await
@@ -711,5 +714,16 @@ mod tests {
                 .await,
             Err(ModelError::InvalidRequest(_))
         ));
+    }
+
+    /// 真余弦：非单位向量按模长归一化后计算（[3,4]·[4,3] = 24/25）。
+    #[test]
+    fn cosine_similarity_handles_non_unit_vectors() {
+        let sim = cosine_similarity(&[3.0, 4.0], &[4.0, 3.0]);
+        assert!((sim - 24.0 / 25.0).abs() < 1e-6);
+        // 零向量视为不相似。
+        assert_eq!(cosine_similarity(&[0.0, 0.0], &[1.0, 0.0]), 0.0);
+        // 维度不一致视为不相似。
+        assert_eq!(cosine_similarity(&[1.0], &[1.0, 0.0]), 0.0);
     }
 }

@@ -28,7 +28,7 @@ pub trait ModelService: Send + Sync {
         tx: mpsc::Sender<ModelStreamChunk>,
     ) -> Result<(), ModelError>;
 
-    /// 文本向量化。
+    /// 文本向量化（task_type 必填，宿主对缺失/未知值返回 InvalidRequest）。
     async fn embedding(
         &self,
         req: ModelEmbeddingRequest,

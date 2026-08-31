@@ -373,7 +373,7 @@ impl PluginHandle {
         self.model_service.chat(req).await
     }
 
-    /// 按 model_id 调用文本向量化。
+    /// 按 model_id 调用文本向量化（task_type 必填，宿主对缺失/未知值返回 InvalidRequest）。
     pub async fn model_embedding(
         &self,
         req: ModelEmbeddingRequest,

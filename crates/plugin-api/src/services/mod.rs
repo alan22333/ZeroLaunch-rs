@@ -27,13 +27,11 @@ pub use hotkey::{
 };
 pub use icon::*;
 pub use icon_request::IconRequest;
-pub use installation_monitor::{
-    InstallationCallback, InstallationEvent, InstallationEventKind, InstallationMonitor,
-};
 pub use model::{
-    ChatCapability, EmbeddingCapability, ModelChatMessage, ModelChatRequest, ModelChatResponse,
-    ModelChatRole, ModelEmbeddingRequest, ModelEmbeddingResponse, ModelError, ModelInfo, ModelKind,
-    ModelProvider, ModelService, ModelSimilarity, ModelStreamChunk, ModelTokenUsage,
+    ChatCapability, EmbeddingCapability, EmbeddingTemplateArgs, ModelChatMessage, ModelChatRequest,
+    ModelChatResponse, ModelChatRole, ModelEmbeddingRequest, ModelEmbeddingResponse, ModelError,
+    ModelInfo, ModelKind, ModelProvider, ModelService, ModelSimilarity, ModelStreamChunk,
+    ModelTokenUsage, SemanticTask,
 };
 pub use parameter::types::{ParameterError, ParameterSnapshot};
 pub use parameter::*;

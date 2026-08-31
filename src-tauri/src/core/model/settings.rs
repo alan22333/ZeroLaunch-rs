@@ -91,22 +91,6 @@ pub struct EmbeddingModelConfig {
         rename = "embedding_capabilities"
     )]
     pub capabilities: Vec<EmbeddingCapability>,
-    /// 语义任务模板条目：task 为语义任务序列化名（如 "retrieval_query"），
-    /// template 为输入模板（{0} = input 文本，{1}+ = template_args 顺序填充）。
-    /// 空列表 = 使用内置模型档案模板；档案匹配不到时裸传。
-    #[serde(default, rename = "task_templates")]
-    pub task_templates: Vec<TaskTemplateItem>,
-}
-
-/// 语义任务模板条目：task（语义任务序列化名）→ template（输入模板）。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TaskTemplateItem {
-    /// 语义任务序列化名（retrieval_document / retrieval_query 等）。
-    #[serde(default, rename = "task")]
-    pub task: String,
-    /// 输入模板（{0} = input 文本，{1}+ = template_args 顺序填充）。
-    #[serde(default, rename = "template")]
-    pub template: String,
 }
 
 impl Default for EmbeddingModelConfig {
@@ -116,7 +100,6 @@ impl Default for EmbeddingModelConfig {
             context_length: default_context_length(),
             similarity: ModelSimilarity::default(),
             capabilities: default_embedding_capabilities(),
-            task_templates: Vec::new(),
         }
     }
 }
@@ -350,7 +333,7 @@ mod tests {
             "kind": "embedding",
             "context_length": 8192,
             "similarity": "dotProduct",
-            "embedding_capabilities": ["taskType", "outputDimensions"]
+            "embedding_capabilities": ["outputDimensions"]
         }))
         .unwrap();
         let ModelEntryConfig::Embedding { config, .. } = entry else {

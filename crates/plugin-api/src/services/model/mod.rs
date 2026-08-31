@@ -12,8 +12,8 @@ mod types;
 pub use provider::ModelProvider;
 pub use service::ModelService;
 pub use types::{
-    ChatCapability, EmbeddingCapability, ModelChatMessage, ModelChatRequest, ModelChatResponse,
-    ModelChatRole, ModelEmbeddingRequest, ModelEmbeddingResponse, ModelError, ModelInfo, ModelKind,
-    ModelSimilarity, ModelSimilarityRequest, ModelSimilarityResponse, ModelStreamChunk,
-    ModelTokenUsage,
+    ChatCapability, EmbeddingCapability, EmbeddingTemplateArgs, ModelChatMessage, ModelChatRequest,
+    ModelChatResponse, ModelChatRole, ModelEmbeddingRequest, ModelEmbeddingResponse, ModelError,
+    ModelInfo, ModelKind, ModelSimilarity, ModelSimilarityRequest, ModelSimilarityResponse,
+    ModelStreamChunk, ModelTokenUsage, SemanticTask,
 };

@@ -38,7 +38,7 @@ pub trait ModelProvider: Send + Sync {
         tx: mpsc::Sender<ModelStreamChunk>,
     ) -> Result<(), ModelError>;
 
-    /// 调用文本向量化模型；仅支持 embedding 模型的提供方实现。
+    /// 调用文本向量化模型；仅支持 embedding 模型的提供方实现（task_type 必填）。
     async fn embedding(
         &self,
         req: ModelEmbeddingRequest,

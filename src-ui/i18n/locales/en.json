@@ -686,18 +686,6 @@
         "embedding_capabilities": {
           "label": "Embedding capabilities",
           "desc": "Select the input and output capabilities supported by this model; only checked capabilities are used"
-        },
-        "task_templates": {
-          "label": "Task templates",
-          "desc": "Input template per semantic task; {0} = input text, {1}+ = template args in order. Leave empty to use built-in model rules",
-          "task": {
-            "label": "Semantic task",
-            "desc": "Cross-model unified semantic task type"
-          },
-          "template": {
-            "label": "Template",
-            "desc": "Input template; {0} = input text, {1}+ = template args in order"
-          }
         }
       },
       "kinds": {
@@ -717,16 +705,7 @@
       },
       "capabilities": {
         "reasoning": "Reasoning",
-        "task_type": "Task-type prompt",
         "output_dimensions": "Output dimension truncation"
-      },
-      "tasks": {
-        "retrieval_document": "Retrieve documents",
-        "retrieval_query": "Retrieve query",
-        "semantic_similarity": "Semantic similarity",
-        "classification": "Classification",
-        "clustering": "Clustering",
-        "plain_text": "Plain text (no template)"
       }
     },
     "hotkey-config": {

@@ -29,12 +29,12 @@ const L2_VERSION: u8 = 1;
 struct CacheKeyPayload<'a> {
     /// 提供方身份（如 "openai"），与 model_id 前缀独立：不同提供方的相同 model_id 相互隔离。
     provider: &'a str,
-    /// 单条输入请求（input 仅含该条文本及其对应的 template_args/task_type/dimensions）。
+    /// 单条输入请求（input 仅含该条文本及其对应的 task_type/dimensions）。
     request: &'a ModelEmbeddingRequest,
 }
 
 /// 计算缓存键：`sha256(serde_json(provider ‖ 单条输入请求))`。
-/// 提供方/模型/文本/模板参数/任务类型/维度任一不同即不同条目；
+/// 提供方/模型/文本/任务类型/维度任一不同即不同条目；
 /// 组装由提供方内部完成，键直接覆盖请求参数全集，无需感知最终输入文本。
 pub fn compute_key(provider: &str, single: &ModelEmbeddingRequest) -> [u8; 32] {
     let payload = CacheKeyPayload {
@@ -143,82 +143,55 @@ impl EmbeddingCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zerolaunch_plugin_api::services::model::SemanticTask;
 
     /// 构造单条输入请求（task_type 恒空，单独用例覆盖）。
     fn single_request(
         model_id: &str,
         text: &str,
-        template_args: Option<&[&str]>,
         dimensions: Option<u32>,
     ) -> ModelEmbeddingRequest {
         ModelEmbeddingRequest {
             model_id: model_id.to_string(),
             input: vec![text.to_string()],
-            template_args: template_args
-                .map(|args| vec![args.iter().map(|a| a.to_string()).collect()]),
-            task_type: None,
+            template_args: None,
+            task_type: SemanticTask::RetrievalDocument,
             dimensions,
         }
     }
 
     #[test]
     fn compute_key_is_sensitive_to_all_segments() {
-        let a = compute_key(
-            "openai",
-            &single_request("openai/m", "text", None, Some(256)),
-        );
+        let a = compute_key("openai", &single_request("openai/m", "text", Some(256)));
         assert_eq!(
             a,
-            compute_key(
-                "openai",
-                &single_request("openai/m", "text", None, Some(256))
-            )
+            compute_key("openai", &single_request("openai/m", "text", Some(256)))
         );
         // 任意一段不同 → 键不同
         assert_ne!(
             a,
-            compute_key(
-                "openai",
-                &single_request("openai/m", "text2", None, Some(256))
-            )
+            compute_key("openai", &single_request("openai/m", "text2", Some(256)))
         );
         // 不同 provider 的相同 model_id 相互隔离
         assert_ne!(
             a,
-            compute_key(
-                "ollama",
-                &single_request("openai/m", "text", None, Some(256))
-            )
+            compute_key("ollama", &single_request("openai/m", "text", Some(256)))
         );
         assert_ne!(
             a,
-            compute_key(
-                "openai",
-                &single_request("openai/m2", "text", None, Some(256))
-            )
+            compute_key("openai", &single_request("openai/m2", "text", Some(256)))
         );
         assert_ne!(
             a,
-            compute_key("openai", &single_request("openai/m", "text", None, None))
+            compute_key("openai", &single_request("openai/m", "text", None))
         );
         assert_ne!(
             a,
-            compute_key(
-                "openai",
-                &single_request("openai/m", "text", None, Some(512))
-            )
-        );
-        // title 参与键
-        assert_ne!(
-            a,
-            compute_key(
-                "openai",
-                &single_request("openai/m", "text", Some(&["t1"]), Some(256))
-            )
+            compute_key("openai", &single_request("openai/m", "text", Some(512)))
         );
         // task_type 参与键
-        let mut with_task = single_request("openai/m", "text", None, Some(256));
-        with_task.task_type = Some("retrieval_document".to_string());
+        let mut with_task = single_request("openai/m", "text", Some(256));
+        with_task.task_type = SemanticTask::RetrievalQuery;
         assert_ne!(a, compute_key("openai", &with_task));
     }
 
@@ -248,10 +221,7 @@ mod tests {
 
     #[test]
     fn l2_rel_key_uses_two_level_sharding() {
-        let key = compute_key(
-            "openai",
-            &single_request("openai/m", "text", None, Some(256)),
-        );
+        let key = compute_key("openai", &single_request("openai/m", "text", Some(256)));
         let rel = l2_rel_key(&key);
         assert_eq!(rel.len(), 2 + 1 + 64 + 4); // "ab/"+hex(64)+".bin"
         assert_eq!(rel.as_bytes()[2], b'/');

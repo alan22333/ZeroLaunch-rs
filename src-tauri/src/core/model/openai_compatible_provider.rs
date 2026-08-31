@@ -341,13 +341,7 @@ impl ModelProvider for OpenAiCompatibleProvider {
         });
         let texts = compose_embedding_texts(
             &req.input,
-            req.task_type.as_deref(),
-            embedding_config
-                .map(|config| config.capabilities.as_slice())
-                .unwrap_or(&[]),
-            embedding_config
-                .map(|config| config.task_templates.as_slice())
-                .unwrap_or(&[]),
+            req.task_type,
             &req.model_id,
             req.template_args.as_deref(),
         )?;
@@ -389,22 +383,7 @@ impl ModelProvider for OpenAiCompatibleProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[tokio::test]
-    async fn embedding_rejects_task_type_without_capability() {
-        let provider = OpenAiCompatibleProvider::new(Default::default());
-        let err = provider
-            .embedding(ModelEmbeddingRequest {
-                model_id: "openai/some-model".to_string(),
-                input: vec![String::new()],
-                template_args: None,
-                task_type: Some("retrieval_document".to_string()),
-                dimensions: None,
-            })
-            .await
-            .unwrap_err();
-        assert!(matches!(err, ModelError::InvalidRequest(_)));
-    }
+    use zerolaunch_plugin_api::services::model::SemanticTask;
 
     #[tokio::test]
     async fn chat_rejects_invalid_reasoning_effort() {
@@ -433,11 +412,7 @@ mod tests {
                     dimensions: 1536,
                     context_length: 8192,
                     similarity: ModelSimilarity::DotProduct,
-                    capabilities: vec![
-                        EmbeddingCapability::TaskType,
-                        EmbeddingCapability::OutputDimensions,
-                    ],
-                    task_templates: Vec::new(),
+                    capabilities: vec![EmbeddingCapability::OutputDimensions],
                 },
             },
             ModelEntryConfig::Chat {
@@ -460,7 +435,7 @@ mod tests {
             assert_eq!(*context_window, Some(8192));
             assert_eq!(*dimensions, None);
             assert_eq!(*similarity, ModelSimilarity::DotProduct);
-            assert_eq!(capabilities.len(), 2);
+            assert_eq!(capabilities.len(), 1);
         } else {
             panic!("expected embedding model");
         }
@@ -512,7 +487,7 @@ mod tests {
                 model_id: "openai/embedding-model".to_string(),
                 input: vec!["text".to_string()],
                 template_args: None,
-                task_type: None,
+                task_type: SemanticTask::RetrievalQuery,
                 dimensions: Some(128),
             })
             .await
