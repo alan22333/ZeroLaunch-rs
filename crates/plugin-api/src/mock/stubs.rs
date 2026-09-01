@@ -1,5 +1,5 @@
-//! Stub implementations of all plugin-api service traits.
-//! Each stub returns a sensible default (empty / Ok / false).
+//! 全部 plugin-api 服务 trait 的桩实现。
+//! 每个桩返回合理默认值（空 / Ok / false）。
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -33,7 +33,7 @@ use crate::services::window::window_positioner::{
 };
 use crate::services::window::WindowManager;
 
-// ===== Theme Provider =====
+// ===== 主题提供方 =====
 
 /// 固定返回浅色主题的主题提供器桩，供测试构造 PluginHandle。
 pub struct StubThemeProvider;
@@ -45,7 +45,7 @@ impl crate::services::theme::ThemeProvider for StubThemeProvider {
     }
 }
 
-// ===== Icon Extractor =====
+// ===== 图标提取器 =====
 
 pub struct StubIconExtractor;
 
@@ -71,7 +71,7 @@ impl IconExtractor for StubIconExtractor {
     }
 }
 
-// ===== Shell Executor =====
+// ===== Shell 执行器 =====
 
 #[derive(Default)]
 pub struct StubShellExecutor {
@@ -95,7 +95,7 @@ impl ShellExecutor for StubShellExecutor {
     }
 }
 
-// ===== Model Service =====
+// ===== 模型服务 =====
 
 pub struct StubModelService;
 
@@ -141,7 +141,7 @@ impl crate::services::model::ModelService for StubModelService {
     }
 }
 
-// ===== Clipboard Manager =====
+// ===== 剪贴板管理 =====
 
 pub struct StubClipboardManager;
 
@@ -151,7 +151,7 @@ impl ClipboardManager for StubClipboardManager {
     }
 }
 
-// ===== Window Manager =====
+// ===== 窗口管理 =====
 
 pub struct StubWindowManager;
 
@@ -163,9 +163,12 @@ impl WindowManager for StubWindowManager {
     async fn activate_window_by_title(&self, _title: &str) -> Result<bool, HostApiError> {
         Ok(false)
     }
+    async fn activate_window_by_pid(&self, _pid: u32) -> Result<bool, HostApiError> {
+        Ok(false)
+    }
 }
 
-// ===== Window Positioner =====
+// ===== 窗口定位器 =====
 
 pub struct StubWindowPositioner;
 
@@ -179,7 +182,7 @@ impl WindowPositioner for StubWindowPositioner {
     }
 }
 
-// ===== Path Resolver =====
+// ===== 路径解析 =====
 
 pub struct StubPathResolver;
 
@@ -189,7 +192,7 @@ impl PathResolver for StubPathResolver {
     }
 }
 
-// ===== App Enumerator =====
+// ===== 应用枚举器 =====
 
 pub struct StubAppEnumerator;
 
@@ -200,7 +203,7 @@ impl AppEnumerator for StubAppEnumerator {
     }
 }
 
-// ===== App Launcher =====
+// ===== 应用启动器 =====
 
 pub struct StubAppLauncher;
 
@@ -215,7 +218,7 @@ impl AppLauncher for StubAppLauncher {
     }
 }
 
-// ===== Lnk Resolver =====
+// ===== 快捷方式解析 =====
 
 pub struct StubLnkResolver;
 
@@ -225,7 +228,7 @@ impl LnkResolver for StubLnkResolver {
     }
 }
 
-// ===== Resource Loader =====
+// ===== 资源加载器 =====
 
 pub struct StubResourceLoader;
 
@@ -235,7 +238,7 @@ impl ResourceLoader for StubResourceLoader {
     }
 }
 
-// ===== Parameter Resolver =====
+// ===== 参数解析器 =====
 
 pub struct StubParameterResolver;
 
@@ -257,7 +260,7 @@ impl ParameterResolver for StubParameterResolver {
     }
 }
 
-// ===== System Parameter Provider =====
+// ===== 系统参数提供方 =====
 
 pub struct StubSystemParameterProvider;
 
@@ -268,7 +271,7 @@ impl SystemParameterProvider for StubSystemParameterProvider {
     }
 }
 
-// ===== AutoStart Manager =====
+// ===== 开机自启动管理 =====
 
 pub struct StubAutoStartManager;
 
@@ -288,7 +291,7 @@ impl AutoStartManager for StubAutoStartManager {
     }
 }
 
-// ===== Hotkey Manager =====
+// ===== 热键管理 =====
 
 pub struct StubHotkeyManager;
 
@@ -319,7 +322,7 @@ impl HotkeyManager for StubHotkeyManager {
     fn unregister_callback(&self, _id: &str) {}
 }
 
-// ===== Installation Monitor =====
+// ===== 安装监控 =====
 
 pub struct StubInstallationMonitor;
 
@@ -340,7 +343,7 @@ impl InstallationMonitor for StubInstallationMonitor {
     fn update_debounce_secs(&self, _secs: f64) {}
 }
 
-// ===== Focus Monitor =====
+// ===== 焦点监控 =====
 
 pub struct StubFocusMonitor;
 
@@ -349,7 +352,7 @@ impl FocusMonitor for StubFocusMonitor {
     fn unregister_callback(&self, _id: &str) {}
 }
 
-// ===== Storage Service =====
+// ===== 存储服务 =====
 
 pub struct StubStorageService;
 

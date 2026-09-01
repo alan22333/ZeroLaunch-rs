@@ -128,4 +128,4 @@ pub const REQUIRED_PROVIDES_VALUES: &[&str] = &[
 ];
 
 /// 反向域名格式插件 ID 的正则表达式。
-pub const PLUGIN_ID_RE: &str = r"^[a-z][a-z0-9]*(\.[a-z][a-z0-9_-]*)+$";
+pub const PLUGIN_ID_RE: &str = r"\A[a-z][a-z0-9]*(\.[a-z][a-z0-9_-]*)+\z";

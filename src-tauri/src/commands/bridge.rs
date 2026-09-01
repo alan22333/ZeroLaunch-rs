@@ -69,6 +69,9 @@ pub struct BridgeQueryResponse {
     pub mode: String,
     #[serde(rename = "generation")]
     pub generation: u64,
+    /// 候选缓存世代：前端确认时回传校验（防止缓存刷新后 id 漂移执行错误候选）。
+    #[serde(rename = "candidateGeneration")]
+    pub candidate_generation: u64,
     #[serde(rename = "results")]
     pub results: Vec<BridgeSearchResult>,
     #[serde(rename = "panelType", default)]
@@ -120,6 +123,11 @@ pub enum ConfirmRequestPayload {
         /// 会话代际：前端最后一次观测到的代际，后端据此拒绝过期确认（必填，见设计 §5.4）。
         #[serde(rename = "generation")]
         generation: u64,
+        /// 候选缓存世代：前端最后一次观测到的缓存世代（refresh_candidates 递增），
+        /// 后端校验与当前缓存一致，防止刷新后 id 漂移执行错误候选。
+        /// 缺省 0 = 旧前端未携带，后端跳过校验（兼容）。
+        #[serde(rename = "candidateGeneration", default)]
+        candidate_generation: u64,
     },
     /// 插件面板动作：自定义能力调用（面板按键契约 Custom / GotoPanel 回插件）。
     #[serde(rename = "pluginAction")]
@@ -151,6 +159,9 @@ pub enum BridgeConfirmResponse {
     Executed {
         #[serde(rename = "generation")]
         generation: u64,
+        /// 确认后最新候选缓存世代（前端更新本地，后续确认回传）。
+        #[serde(rename = "candidateGeneration")]
+        candidate_generation: u64,
     },
     #[serde(rename = "enterParamPanel")]
     EnterParamPanel {
@@ -160,6 +171,9 @@ pub enum BridgeConfirmResponse {
         user_arg_count: usize,
         #[serde(rename = "generation")]
         generation: u64,
+        /// 确认后最新候选缓存世代（前端更新本地，后续确认回传）。
+        #[serde(rename = "candidateGeneration")]
+        candidate_generation: u64,
     },
 }
 
@@ -292,6 +306,7 @@ pub async fn bridge_query(
             Ok(BridgeQueryResponse {
                 mode: "search".to_string(),
                 generation: routed.generation,
+                candidate_generation: session_dispatcher.get_candidates_generation(),
                 results: bridge_results,
                 panel_type: None,
                 panel_data: None,
@@ -305,6 +320,7 @@ pub async fn bridge_query(
             Ok(BridgeQueryResponse {
                 mode: "search".to_string(),
                 generation: routed.generation,
+                candidate_generation: session_dispatcher.get_candidates_generation(),
                 results: Vec::new(),
                 panel_type: None,
                 panel_data: None,
@@ -344,6 +360,7 @@ pub async fn bridge_query(
             Ok(BridgeQueryResponse {
                 mode: mode.to_string(),
                 generation: routed.generation,
+                candidate_generation: session_dispatcher.get_candidates_generation(),
                 results: Vec::new(),
                 panel_type: Some(panel_type),
                 panel_data: Some(data),
@@ -363,6 +380,7 @@ pub async fn bridge_query(
             Ok(BridgeQueryResponse {
                 mode: "inline_param".to_string(),
                 generation: routed.generation,
+                candidate_generation: session_dispatcher.get_candidates_generation(),
                 results: Vec::new(),
                 panel_type: None,
                 panel_data: None,
@@ -405,12 +423,14 @@ pub async fn bridge_confirm(
             query_text,
             user_args,
             generation,
+            candidate_generation,
         } => ConfirmRequest::Candidate {
             candidate_id: candidate_id as CandidateId,
             action_id,
             query_text,
             user_args: user_args.unwrap_or_default(),
             generation,
+            candidate_generation,
         },
         ConfirmRequestPayload::PluginAction {
             plugin_id,
@@ -440,6 +460,7 @@ pub async fn bridge_confirm(
     Ok(match routed.outcome {
         ConfirmOutcome::Executed => BridgeConfirmResponse::Executed {
             generation: routed.generation,
+            candidate_generation: session_dispatcher.get_candidates_generation(),
         },
         ConfirmOutcome::EnterParamPanel {
             candidate_id,
@@ -448,6 +469,7 @@ pub async fn bridge_confirm(
             candidate_id,
             user_arg_count,
             generation: routed.generation,
+            candidate_generation: session_dispatcher.get_candidates_generation(),
         },
     })
 }

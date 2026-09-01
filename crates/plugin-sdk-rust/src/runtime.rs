@@ -242,8 +242,8 @@ async fn run_async(mut app: PluginApp) {
     // 通道
     let (request_tx, mut request_rx) = mpsc::channel::<IncomingRequest>(64);
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<Vec<u8>>(64);
-    let pending: Arc<DashMap<u64, oneshot::Sender<serde_json::Value>>> = Arc::new(DashMap::new());
-
+    let pending: Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, JsonRpcError>>>> =
+        Arc::new(DashMap::new());
     // 创建 HostProxy 并写入全局，供 dispatch/read/write 三任务共享访问。
     let host_proxy = Arc::new(HostProxy::new(pending.clone(), outbound_tx.clone()));
     let _ = HOST_PROXY.set(host_proxy);
@@ -282,18 +282,17 @@ async fn run_async(mut app: PluginApp) {
                     continue;
                 }
             };
-            tracing::debug!(
-                "收到宿主消息 ({} bytes): {:?}",
-                body.len(),
-                summarize_message(&msg)
-            );
             match msg {
                 Message::Response(resp) => {
                     if let Some((_, tx)) = pending_r.remove(&resp.id) {
-                        let result = resp
-                            .result
-                            .or(resp.error.map(|e| serde_json::Value::String(e.message)))
-                            .unwrap_or(serde_json::Value::Null);
+                        // 错误走 Err 分支携带结构化 JsonRpcError，不再伪装成字符串结果：
+                        // 宿主拒绝/模型错误等可被调用方区分，模型方法 from_value 不再被
+                        // "invalid type: string" 淹没真实错误。
+                        let result = if let Some(err) = resp.error {
+                            Err(err)
+                        } else {
+                            Ok(resp.result.unwrap_or(serde_json::Value::Null))
+                        };
                         let _ = tx.send(result);
                     } else {
                         // 如果没有对应的 pending channel，说明响应已经超时或被取消，忽略。同时打印一下被忽略的信息

@@ -8,6 +8,8 @@ import { i18n } from '@/i18n'
  * - onSettingsUpdate(cb)：宿主下发当前设置值（进入/变更时调用）
  * - save(settings)：设置值提交回宿主（emit save → 配置系统保存）
  * - t(key)：插件语言包翻译（自动补插件 id 前缀，key-or-literal）
+ * - onDestroy(cb)：注册销毁回调（或返回 cleanup 作为 mountFn 返回值），
+ *   宿主卸载时统一调用，供插件清理定时器 / window 级监听器等资源
  */
 const props = defineProps<{
   pluginId: string
@@ -24,12 +26,17 @@ const containerRef = ref<HTMLDivElement | null>(null)
 type SettingsHost = {
   pluginId: string
   onSettingsUpdate: (cb: (settings: unknown) => void) => void
+  onDestroy: (cb: () => void) => void
   save: (settings: unknown) => void
   t: (key: string, params?: Record<string, unknown>) => string
 }
 
-let mountFn: ((rootEl: HTMLElement, host: SettingsHost) => void) | null = null
+let mountFn: ((rootEl: HTMLElement, host: SettingsHost) => void | (() => void)) | null = null
 let settingsUpdateCb: ((settings: unknown) => void) | null = null
+// 设置面板销毁回调（host.onDestroy 注册 + mountFn 返回值 cleanup），卸载时统一调用
+let destroyCbs: Array<() => void> = []
+// 卸载标记：动态 import 竞态守卫（import 期间组件已卸载则放弃挂载）
+let disposed = false
 
 async function loadSettings() {
   if (!containerRef.value || !props.settingsEntryUrl) return
@@ -48,13 +55,20 @@ async function loadSettings() {
   shadow.appendChild(mountEl)
   try {
     const mod = await import(/* @vite-ignore */ props.settingsEntryUrl)
+    // 竞态守卫：import 期间组件已卸载则放弃挂载（shadow root 已悬空）
+    if (disposed) return
+    destroyCbs = []
     mountFn = mod.default
-    mountFn?.(mountEl, {
+    // mountFn 可返回 cleanup 函数（与 host.onDestroy 注册的回调一起于卸载时执行）
+    const cleanup = mountFn?.(mountEl, {
       pluginId: props.pluginId,
       onSettingsUpdate(cb) {
         settingsUpdateCb = cb
         // 注册后立即重放当前设置（watch immediate 触发时回调尚未注册，初值已错过）
         cb(props.currentSettings)
+      },
+      onDestroy(cb) {
+        destroyCbs.push(cb)
       },
       save: (settings) => emit('save', settings),
       t(key, params) {
@@ -62,7 +76,9 @@ async function loadSettings() {
         return i18n.global.te(fullKey) ? i18n.global.t(fullKey, params ?? {}) : key
       },
     })
+    if (typeof cleanup === 'function') destroyCbs.push(cleanup)
   } catch (err) {
+    if (disposed) return
     shadow.innerHTML = ''
     const fallback = document.createElement('div')
     fallback.className = 'fallback'
@@ -77,6 +93,16 @@ async function loadSettings() {
 onMounted(loadSettings)
 
 onUnmounted(() => {
+  disposed = true
+  // 卸载时调用插件注册的销毁回调，清理定时器 / window 级监听器等资源
+  for (const cb of destroyCbs) {
+    try {
+      cb()
+    } catch (err) {
+      console.error('[ThirdPartySettingsHost] 设置面板销毁回调执行失败:', err)
+    }
+  }
+  destroyCbs = []
   mountFn = null
   settingsUpdateCb = null
 })

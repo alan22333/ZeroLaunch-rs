@@ -44,13 +44,27 @@
 插件 UI 统一内嵌执行（Shadow DOM + 动态 import `zlplugin://` 资源），
 无 iframe、无 postMessage 桥、无 CLI HTTP 依赖。
 
-### 面板主题跟随宿主
+### 面板销毁契约
 
-自定义面板运行在宿主 Shadow DOM 内，**样式应直接使用宿主 CSS 变量**
-（`--bg-primary`、`--text-primary`、`--text-secondary`、`--border-color`、
-`--accent-color`、`--primary-color-alpha` 等，定义见 `variables.css` 与
-`applyAppearanceSettings`）。自定义属性穿过 Shadow DOM 边界继承，宿主切换
-浅色/深色主题时面板自动跟随，无需任何 IPC 或轮询。
+面板开关时宿主会卸载 Shadow DOM 容器。插件若在 `mount` 内创建了
+**定时器 / window 级监听器等长期资源**，必须自行清理，否则随开关次数
+线性累积泄漏。宿主提供两种销毁语义（等价，任选其一）：
+
+- `host.onDestroy(cb)`：在 mount 内注册清理回调，宿主卸载面板时调用
+- `mount` 返回 cleanup 函数：宿主卸载面板时调用返回值
+
+```js
+export default function mount(rootEl, host) {
+  const timer = setInterval(/* ... */, 1000)
+  const onKey = (e) => { /* ... */ }
+  window.addEventListener('keydown', onKey)
+  // 面板卸载时宿主调用，清理资源
+  host.onDestroy(() => {
+    clearInterval(timer)
+    window.removeEventListener('keydown', onKey)
+  })
+}
+```
 
 插件进程如需主题信息（如按主题调整逻辑），使用宿主主题查询能力：
 

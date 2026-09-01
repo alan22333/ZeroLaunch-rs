@@ -209,6 +209,10 @@ impl OpenAiCompatibleProvider {
     }
 }
 
+/// 总超时：模型生成/embedding 单次调用上限（reqwest 无默认总超时，
+/// 误配 base_url 或服务挂起时会永久阻塞；外层 timeout 兜底）。
+const MODEL_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 #[async_trait]
 impl ModelProvider for OpenAiCompatibleProvider {
     fn provider_id(&self) -> String {
@@ -216,8 +220,9 @@ impl ModelProvider for OpenAiCompatibleProvider {
     }
     /// 返回 endpoint 与模型配置组成的 embedding 缓存命名空间。
     fn cache_namespace(&self) -> String {
-        let models = serde_json::to_string(&self.settings.models).unwrap_or_default();
-        format!("{}:{}:{}", PROVIDER_ID, self.settings.base_url, models)
+        // 仅含 provider + base_url：请求参数（模型/文本/任务/维度）已参与 compute_key，
+        // 全量 models JSON 掺入会让无关配置改动（如 temperature）清空整个 embedding 缓存。
+        format!("{}:{}", PROVIDER_ID, self.settings.base_url)
     }
 
     async fn list_models(&self) -> Result<Vec<ModelInfo>, ModelError> {
@@ -255,10 +260,9 @@ impl ModelProvider for OpenAiCompatibleProvider {
             .map_err(|e| ModelError::InvalidRequest(e.to_string()))?;
 
         let client = self.client();
-        let resp = client
-            .chat()
-            .create(build)
+        let resp = tokio::time::timeout(MODEL_CALL_TIMEOUT, client.chat().create(build))
             .await
+            .map_err(|_| ModelError::Transport("模型调用超时".to_string()))?
             .map_err(|e| ModelError::Transport(e.to_string()))?;
 
         let content = resp
@@ -299,11 +303,13 @@ impl ModelProvider for OpenAiCompatibleProvider {
             .build()
             .map_err(|e| ModelError::InvalidRequest(e.to_string()))?;
         let client = self.client();
-        let mut stream = pin!(client
-            .chat()
-            .create_stream(build)
-            .await
-            .map_err(|e| ModelError::Transport(e.to_string()))?);
+        let mut stream = pin!(tokio::time::timeout(
+            MODEL_CALL_TIMEOUT,
+            client.chat().create_stream(build),
+        )
+        .await
+        .map_err(|_| ModelError::Transport("模型调用超时".to_string()))?
+        .map_err(|e| ModelError::Transport(e.to_string()))?);
         let mut finish_reason = None;
         while let Some(chunk) = stream.next().await {
             match chunk {
@@ -362,10 +368,9 @@ impl ModelProvider for OpenAiCompatibleProvider {
             .build()
             .map_err(|e| ModelError::InvalidRequest(e.to_string()))?;
         let client = self.client();
-        let resp = client
-            .embeddings()
-            .create(build)
+        let resp = tokio::time::timeout(MODEL_CALL_TIMEOUT, client.embeddings().create(build))
             .await
+            .map_err(|_| ModelError::Transport("模型调用超时".to_string()))?
             .map_err(|e| ModelError::Transport(e.to_string()))?;
         let vectors: Vec<Vec<f32>> = resp.data.into_iter().map(|item| item.embedding).collect();
         let dimensions = vectors

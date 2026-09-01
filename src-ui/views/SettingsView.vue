@@ -80,6 +80,7 @@ import { useI18n } from 'vue-i18n'
 import { registerErrorHandler } from '../bridge/commands'
 import { configGetVersion } from '../bridge/commands'
 import type { BridgeError } from '../bridge/commands'
+import { formatErrorMessage } from '../utils/errors'
 import type { ComponentInfo } from '../bridge/contract'
 
 const configStore = useConfigStore()
@@ -118,7 +119,7 @@ async function init() {
     ])
     version.value = loadedVersion
   } catch (e) {
-    loadErr.value = String(e)
+    loadErr.value = formatErrorMessage(e)
   } finally {
     loading.value = false
   }

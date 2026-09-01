@@ -200,10 +200,15 @@ impl JsonRpcClient {
         self.pending.insert(id, tx);
 
         let request = Request::new(id, method, params_value);
-        self.outbound_tx
-            .send(Message::Request(request))
-            .await
-            .map_err(|_| ProtocolError::TransportClosed)?;
+        // send 超时防护：插件停读 stdin 后管道填满，send().await 永久挂起
+        //（既定 RPC 超时形同虚设）。5s 后按传输关闭处理。
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            self.outbound_tx.send(Message::Request(request)),
+        )
+        .await
+        .map_err(|_| ProtocolError::TransportClosed)?
+        .map_err(|_| ProtocolError::TransportClosed)?;
 
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(Ok(value))) => {
@@ -229,10 +234,13 @@ impl JsonRpcClient {
     pub async fn notify<P: Serialize>(&self, method: &str, params: P) -> Result<(), ProtocolError> {
         let params_value = serde_json::to_value(params)?;
         let notif = zerolaunch_plugin_protocol::Notification::new(method, params_value);
-        self.outbound_tx
-            .send(Message::Notification(notif))
-            .await
-            .map_err(|_| ProtocolError::TransportClosed)?;
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            self.outbound_tx.send(Message::Notification(notif)),
+        )
+        .await
+        .map_err(|_| ProtocolError::TransportClosed)?
+        .map_err(|_| ProtocolError::TransportClosed)?;
         Ok(())
     }
 
@@ -243,20 +251,26 @@ impl JsonRpcClient {
         result: serde_json::Value,
     ) -> Result<(), ProtocolError> {
         let response = Response::ok(id, result);
-        self.outbound_tx
-            .send(Message::Response(response))
-            .await
-            .map_err(|_| ProtocolError::TransportClosed)?;
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            self.outbound_tx.send(Message::Response(response)),
+        )
+        .await
+        .map_err(|_| ProtocolError::TransportClosed)?
+        .map_err(|_| ProtocolError::TransportClosed)?;
         Ok(())
     }
 
     /// Send an error response to a previously received request.
     pub async fn respond_err(&self, id: u64, error: JsonRpcError) -> Result<(), ProtocolError> {
         let response = Response::err(id, error);
-        self.outbound_tx
-            .send(Message::Response(response))
-            .await
-            .map_err(|_| ProtocolError::TransportClosed)?;
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            self.outbound_tx.send(Message::Response(response)),
+        )
+        .await
+        .map_err(|_| ProtocolError::TransportClosed)?
+        .map_err(|_| ProtocolError::TransportClosed)?;
         Ok(())
     }
 }

@@ -96,6 +96,18 @@ impl PluginInstaller {
                     return Err(InstallError::Manifest("parent-dir traversal in zip".into()));
                 }
             }
+            // Windows 盘符前缀（`C:evil`）：非绝对但 join 语义会替换整个 base 盘符，
+            // 拒绝含 Prefix/RootDir 的条目防止写出目标盘任意相对位置。
+            for c in normalized.components() {
+                if matches!(
+                    c,
+                    std::path::Component::Prefix(_)
+                        | std::path::Component::RootDir
+                        | std::path::Component::ParentDir
+                ) {
+                    return Err(InstallError::Manifest("drive-prefix path in zip".into()));
+                }
+            }
 
             let out_path = target_dir.join(relative);
             if let Some(parent) = out_path.parent() {
@@ -115,10 +127,10 @@ impl PluginInstaller {
         Ok(target_dir)
     }
 
-    /// 解析安装源的插件 id（覆盖安装前判断目标目录是否已存在）。
-    /// zip：读取 manifest.toml；目录：读取 <dir>/manifest.toml。
+    /// 返回前校验 id 格式：调用方（覆盖安装预清理）会在完整 manifest 校验
+    /// 之前用该 id 拼装目录并删除旧目录，必须在此处先拦截非法 id。
     pub(crate) fn plugin_id_of(&self, source_path: &Path) -> Result<String, InstallError> {
-        if source_path.is_dir() {
+        let plugin_id = if source_path.is_dir() {
             let manifest_path = source_path.join("manifest.toml");
             if !manifest_path.exists() {
                 return Err(InstallError::Manifest(
@@ -128,13 +140,15 @@ impl PluginInstaller {
             let content = std::fs::read_to_string(&manifest_path)?;
             let manifest: Manifest = toml::from_str(&content)
                 .map_err(|e| InstallError::Manifest(format!("invalid manifest: {}", e)))?;
-            Ok(manifest.plugin.id)
+            manifest.plugin.id
         } else {
             let file = std::fs::File::open(source_path)?;
             let mut archive = zip::ZipArchive::new(file)?;
             let (manifest, _) = read_zip_manifest(source_path, &mut archive)?;
-            Ok(manifest.plugin.id)
-        }
+            manifest.plugin.id
+        };
+        validate_plugin_id(&plugin_id)?;
+        Ok(plugin_id)
     }
 
     /// 从目录复制安装插件到 `plugins_dir/<plugin_id>/`。

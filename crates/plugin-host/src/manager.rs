@@ -1,4 +1,4 @@
-//! PluginHostManager — top-level orchestration for third-party plugins.
+//! PluginHostManager — 第三方插件的顶层编排管理器。
 
 use dashmap::DashMap;
 use parking_lot::RwLock;
@@ -9,6 +9,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 use tokio::sync::mpsc;
+use tokio::sync::Mutex as AsyncMutex;
 use tracing::{error, info, warn};
 
 use base64::Engine;
@@ -103,7 +104,7 @@ impl From<&ProcessState> for PluginRuntimeState {
     }
 }
 
-/// Context needed to restart a crashed plugin.
+/// 重启崩溃插件所需的上下文。
 struct PluginRestartContext {
     manifest: Manifest,
     plugin_dir: PathBuf,
@@ -150,6 +151,8 @@ pub struct PluginHostManager {
     plugins_dir: PathBuf,
     /// 每次加载插件时保存重启上下文，崩溃后可重新拉起。
     restart_contexts: Arc<DashMap<String, Arc<PluginRestartContext>>>,
+    /// 序列化 load/teardown 的注册段（占位检查、spawn、登记、卸载清理）。
+    load_lock: Arc<AsyncMutex<()>>,
     /// 内置组件 id 集合（冲突预检数据源之一）。
     ///
     /// 由 src-tauri 在启动时注入一次（内置组件注册完毕、第三方加载之前）；
@@ -163,7 +166,7 @@ pub struct PluginHostManager {
     self_arc: OnceLock<Arc<Self>>,
 }
 
-/// Error type for plugin loading operations.
+/// 插件加载操作错误类型。
 #[derive(Debug, thiserror::Error)]
 pub enum PluginLoadError {
     #[error("manifest error: {0}")]
@@ -195,6 +198,7 @@ impl PluginHostManager {
             log_dir_root,
             plugins_dir,
             restart_contexts: Arc::new(DashMap::new()),
+            load_lock: Arc::new(AsyncMutex::new(())),
             builtin_component_ids: RwLock::new(HashSet::new()),
             self_arc: OnceLock::new(),
         });
@@ -248,10 +252,13 @@ impl PluginHostManager {
         let manifest: Manifest = toml::from_str(&manifest_bytes)
             .map_err(|e| PluginLoadError::Manifest(format!("invalid manifest: {}", e)))?;
 
-        // Validate manifest
+        // 校验 manifest
         validate_manifest(&manifest, plugin_dir)?;
 
         let plugin_id = manifest.plugin.id.clone();
+
+        // 序列化整个注册段（spawn/登记/冲突预检），load 与 teardown 互斥。
+        let _guard = self.load_lock.lock().await;
 
         // 查重：已加载则拒绝
         if self.processes.contains_key(&plugin_id) {
@@ -282,8 +289,8 @@ impl PluginHostManager {
         // 创建持久崩溃通知通道：管理器持有接收端，发送端跨多次重启共享。
         let (crash_tx, crash_rx) = mpsc::channel::<String>(4);
 
-        // 启动子进程并完成握手
-        let process = PluginProcess::spawn(
+        // 启动子进程并完成握手；失败时直接返回（尚未登记任何条目）
+        let process = match PluginProcess::spawn(
             &manifest,
             plugin_dir,
             &data_dir,
@@ -293,7 +300,14 @@ impl PluginHostManager {
             restart_count,
             locale,
         )
-        .await?;
+        .await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                // spawn 失败：尚未登记任何条目，无需额外清理
+                return Err(e.into());
+            }
+        };
 
         // 在把进程移入 Arc 之前取出 client
         let client = process.client.clone();
@@ -326,10 +340,7 @@ impl PluginHostManager {
         let init_result = match process.discover_components().await {
             Ok(result) => result,
             Err(e) => {
-                // 发现失败时清理登记并关闭已启动的子进程：watchdog 已独占
-                // Child 句柄（child_handle 为 None），kill_on_drop 不会触发，
-                // 只移除登记会让进程残留运行。teardown 关闭 stdin → 进程退出。
-                self.teardown(&plugin_id).await;
+                self.shutdown_loaded_process(&plugin_id).await;
                 return Err(PluginLoadError::Protocol(e));
             }
         };
@@ -354,7 +365,7 @@ impl PluginHostManager {
                 "拒绝加载插件 {}：组件 id '{}' 已被其他已注册组件占用，清理进程并放弃加载",
                 plugin_id, collision
             );
-            self.teardown(&plugin_id).await;
+            self.shutdown_loaded_process(&plugin_id).await;
             return Err(PluginLoadError::ComponentIdCollision {
                 plugin_id,
                 component_id: collision,
@@ -384,49 +395,54 @@ impl PluginHostManager {
         taken_by_plugin || self.builtin_component_ids.read().contains(id)
     }
 
-    /// Unload a plugin: shutdown process and remove from registries.
+    /// 卸载插件：关闭子进程、移除全部登记并删除诊断日志（含轮转 .log.1）。
+    /// 与 teardown（加载失败清理）的区别：teardown 保留日志供故障溯源。
     pub async fn unload(&self, plugin_id: &str) -> Result<(), PluginLoadError> {
         info!("Unloading plugin {}", plugin_id);
         self.teardown(plugin_id).await;
+        // 显式卸载才删日志：失败清理路径保留诊断日志，便于故障溯源
+        for suffix in ["", ".1"] {
+            let log_file = self
+                .log_dir_root
+                .join(format!("{}.log{}", plugin_id, suffix));
+            let _ = std::fs::remove_file(&log_file);
+        }
         Ok(())
     }
 
-    /// 关闭插件子进程并从全部注册表移除（卸载与加载失败清理共用）。
+    /// 关闭插件子进程并从注册表移除登记。
     ///
-    /// 若进程 Arc 无法独占（有泄漏的 clone），先标记 Stopped 让 watchdog
-    /// 不触发重启，再通过 PID 强制终止子进程，防止孤儿进程泄漏。
+    /// 与 load 共用 load_lock，卸载与加载互斥（load 失败清理不调本函数，
+    /// 改调 shutdown_loaded_process——AsyncMutex 非重入，持锁时调用会死锁）。
     async fn teardown(&self, plugin_id: &str) {
-        // shutdown() takes self (ownership), so we must unwrap the Arc.
-        // If try_unwrap fails (Arc refcount > 1), log a warning — this
-        // indicates the process Arc was cloned elsewhere, which shouldn't
-        // happen in normal operation.
+        let _guard = self.load_lock.lock().await;
+        // 先移除重启上下文：崩溃回调/恢复路径不得在 teardown 期间读到旧上下文重启插件
+        self.restart_contexts.remove(plugin_id);
+        self.shutdown_loaded_process(plugin_id).await;
+        self.plugins.remove(plugin_id);
+    }
+
+    /// 关闭已加载插件的子进程并移除进程登记。
+    /// shutdown() 独占 Arc；若 try_unwrap 失败（进程 Arc 在其他处被克隆），
+    /// 先标记 Stopped 阻止 watchdog 重启，再关闭 stdin 并强杀进程。
+    async fn shutdown_loaded_process(&self, plugin_id: &str) {
         if let Some((_, proc)) = self.processes.remove(plugin_id) {
             match Arc::try_unwrap(proc) {
                 Ok(process) => process.shutdown(std::time::Duration::from_secs(5)).await,
                 Err(arc) => {
                     warn!(
-                        "Plugin {} process Arc has {} strong references; forcing kill. \
-                         This may indicate a leaked clone of the process handle.",
+                        "Plugin {} process Arc has {} strong references; forcing kill. \n                         This may indicate a leaked clone of the process handle.",
                         plugin_id,
                         Arc::strong_count(&arc)
                     );
-                    // 先标记 Stopped，让 watchdog 在进程退出后检测到此状态而不触发重启
                     arc.state.write().clone_from(&ProcessState::Stopped);
-                    // 关闭 stdin 阻断 SDK 读循环（防止进程残留），再强杀
                     arc.client.close_transport();
-                    // 通过 PID 强制终止子进程，防止孤儿进程泄漏
                     if let Some(pid) = arc.pid {
                         force_kill_process(pid);
                     }
                 }
             }
         }
-        self.plugins.remove(plugin_id);
-
-        // Remove log file
-        let log_file = self.log_dir_root.join(format!("{}.log", plugin_id));
-        let _ = std::fs::remove_file(&log_file);
-        self.restart_contexts.remove(plugin_id);
     }
 
     /// 更新插件重启上下文中的语言快照。
@@ -440,10 +456,10 @@ impl PluginHostManager {
         }
     }
 
-    /// Build `InstalledPluginInfo` for all loaded adapters.
+    /// 为全部已加载适配器构造 `InstalledPluginInfo`。
     ///
-    /// `enabled_fn` is called per-adapter to determine the `enabled` field;
-    /// callers pass a closure that queries `ConfigManager::is_enabled`.
+    /// `enabled_fn` 按适配器调用以确定 `enabled` 字段；
+    /// 调用方传入查询 `ConfigManager::is_enabled` 的闭包。
     pub fn list_plugin_info(
         &self,
         enabled_fn: impl Fn(&PluginRegistration) -> bool,
@@ -518,7 +534,7 @@ fn build_plugin_info(
     }
 }
 
-/// Information about an installed plugin for the management UI / CLI.
+/// 已安装插件的信息（供管理界面 / CLI 使用）。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstalledPluginInfo {
     #[serde(rename = "pluginId")]
@@ -556,12 +572,12 @@ pub struct InstalledPluginInfo {
     pub mode: PluginMode,
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────
+// ─── 辅助函数 ─────────────────────────────────────────────────────
 
 fn validate_manifest(manifest: &Manifest, plugin_dir: &Path) -> Result<(), PluginLoadError> {
     let id = &manifest.plugin.id;
 
-    // Validate plugin ID format (regex compiled once)
+    // 校验插件 ID 格式（正则只编译一次）
     static PLUGIN_ID_RE: OnceLock<regex::Regex> = OnceLock::new();
     let re = PLUGIN_ID_RE.get_or_init(|| {
         regex::Regex::new(zerolaunch_plugin_protocol::manifest::PLUGIN_ID_RE).unwrap()
@@ -573,7 +589,7 @@ fn validate_manifest(manifest: &Manifest, plugin_dir: &Path) -> Result<(), Plugi
         )));
     }
 
-    // Validate version
+    // 校验版本
     if semver::Version::parse(&manifest.plugin.version).is_err() {
         return Err(PluginLoadError::Manifest(format!(
             "invalid plugin version '{}'",
@@ -581,7 +597,7 @@ fn validate_manifest(manifest: &Manifest, plugin_dir: &Path) -> Result<(), Plugi
         )));
     }
 
-    // Validate required provides
+    // 校验必需的 provides 声明
     if manifest.components.provides.is_empty() {
         return Err(PluginLoadError::Manifest(
             "components.provides must have at least one entry".into(),

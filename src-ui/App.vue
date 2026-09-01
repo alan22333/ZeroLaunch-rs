@@ -17,9 +17,8 @@ import {
   NNotificationProvider,
   NMessageProvider,
   NDialogProvider,
-  zhCN,
-  enUS,
 } from 'naive-ui'
+import { naiveLocaleFor } from './utils/locale'
 import { useThemeStore } from './stores/theme-store'
 import { useConfigStore } from './stores/config-store'
 import { configGetSettings } from './bridge/commands'
@@ -30,7 +29,7 @@ import { onConfigChanged, onPluginInstalled, onPluginUninstalled } from './bridg
 const themeStore = useThemeStore()
 const configStore = useConfigStore()
 
-const naiveLocale = ref(i18n.global.locale.value === 'en' ? enUS : zhCN)
+const naiveLocale = ref(naiveLocaleFor(i18n.global.locale.value))
 
 let unlistenAppearance: (() => void) | null = null
 let unlistenGeneral: (() => void) | null = null
@@ -61,7 +60,7 @@ onMounted(async () => {
       if (result.langChanged) {
         setLocale(result.newLang)
         refreshPluginTranslations(result.newLang)
-        naiveLocale.value = result.newLang === 'en' ? enUS : zhCN
+        naiveLocale.value = naiveLocaleFor(result.newLang)
       }
     }).catch(() => {})
   })

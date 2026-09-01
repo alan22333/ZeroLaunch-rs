@@ -92,21 +92,32 @@ impl ModelManager {
         self.register_provider(Arc::new(ollama_provider::OllamaProvider::new(ollama)));
     }
 
-    /// 从所有提供方重新聚合模型清单（单个提供方失败时跳过并告警）。
+    /// 并发拉取（join_all）并给每个提供方外层超时，避免单点挂起阻塞整体刷新。
     pub async fn refresh_models(&self) {
-        let mut all = Vec::new();
-        // 先收集 Arc 再逐个 await：DashMap 迭代守卫不可跨 await 持有
+        // 先收集 Arc 再并发 await：DashMap 迭代守卫不可跨 await 持有
         let providers: Vec<Arc<dyn ModelProvider>> =
             self.providers.iter().map(|e| e.clone()).collect();
-        for provider in providers {
-            match provider.list_models().await {
-                Ok(mut models) => all.append(&mut models),
-                Err(e) => {
-                    tracing::warn!("模型提供方 {} 清单获取失败: {}", provider.provider_id(), e);
+        let all: Vec<Vec<ModelInfo>> =
+            futures_util::future::join_all(providers.into_iter().map(|provider| async move {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    provider.list_models(),
+                )
+                .await
+                {
+                    Ok(Ok(models)) => models,
+                    Ok(Err(e)) => {
+                        tracing::warn!("模型提供方 {} 清单获取失败: {}", provider.provider_id(), e);
+                        Vec::new()
+                    }
+                    Err(_) => {
+                        tracing::warn!("模型提供方 {} 清单获取超时", provider.provider_id());
+                        Vec::new()
+                    }
                 }
-            }
-        }
-        *self.models.write() = all;
+            }))
+            .await;
+        *self.models.write() = all.into_iter().flatten().collect();
     }
 
     /// 内置模型配置变更时重建提供方并刷新清单。
@@ -332,7 +343,7 @@ impl ModelService for ModelManager {
             return Err(ModelError::NotSupported);
         };
         let similarity = *similarity;
-        let query = &req.query;
+        let query = req.query.clone();
         let dim = query.len();
         if dim == 0 {
             return Err(ModelError::InvalidRequest("查询向量为空".to_string()));
@@ -342,15 +353,21 @@ impl ModelService for ModelManager {
                 "目标向量维度与查询向量不一致".to_string(),
             ));
         }
-        let similarities: Vec<f32> = req
-            .targets
-            .par_iter()
-            .map(|target| match similarity {
-                ModelSimilarity::Cosine => cosine_similarity(query, target),
-                ModelSimilarity::DotProduct => dot_product(query, target),
-                ModelSimilarity::Euclidean => -euclidean_distance(query, target),
-            })
-            .collect();
+        // 相似度计算是 CPU 密集纯函数：移出 async 上下文（spawn_blocking），
+        // 避免 rayon par_iter 同步阻塞 tokio worker 线程。
+        let targets = req.targets.clone();
+        let similarities: Vec<f32> = tauri::async_runtime::spawn_blocking(move || {
+            targets
+                .par_iter()
+                .map(|target| match similarity {
+                    ModelSimilarity::Cosine => cosine_similarity(&query, target),
+                    ModelSimilarity::DotProduct => dot_product(&query, target),
+                    ModelSimilarity::Euclidean => -euclidean_distance(&query, target),
+                })
+                .collect()
+        })
+        .await
+        .map_err(|e| ModelError::Internal(format!("相似度计算任务失败: {}", e)))?;
         Ok(ModelSimilarityResponse {
             model_id: req.model_id,
             similarities,

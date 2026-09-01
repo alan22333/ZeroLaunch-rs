@@ -18,7 +18,6 @@ use crate::state::app_state::AppState;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::App;
-use tauri::Emitter;
 use tauri::LogicalSize;
 use tauri::Manager;
 use tauri::WebviewUrl;
@@ -256,17 +255,6 @@ pub fn run() {
                     app_handle.exit(0);
                 });
             }
-            tauri::RunEvent::WindowEvent {
-                event: tauri::WindowEvent::ThemeChanged(theme),
-                ..
-            } => {
-                let theme_str = match theme {
-                    tauri::Theme::Dark => "dark",
-                    tauri::Theme::Light => "light",
-                    _ => "light",
-                };
-                let _ = app_handle.emit("system-theme-changed", theme_str);
-            }
             _ => {}
         });
 }
@@ -309,7 +297,7 @@ fn build_windows_host_api_builder(
         .app_resource(app_resource)
         .clipboard_manager(Arc::new(WindowsClipboardManager::new()))
         .window_positioner(Arc::new(WindowsWindowPositioner::new()))
-        .theme_provider(Arc::new(WindowsThemeProvider::new()))
+        .theme_provider(Arc::new(WindowsThemeProvider))
 }
 
 /// 初始化搜索栏窗口。

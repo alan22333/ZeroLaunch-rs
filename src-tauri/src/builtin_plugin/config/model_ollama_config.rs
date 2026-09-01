@@ -8,7 +8,6 @@ use ollama_rs::models::ModelInfo;
 use ollama_rs::Ollama;
 use parking_lot::RwLock;
 use serde_json::Value;
-use tracing::warn;
 use zerolaunch_plugin_api::config::{
     ComponentCore, ComponentType, ConfigActionDef, ConfigError, Configurable, DataActionBinding,
     SettingDefinition,
@@ -107,13 +106,9 @@ impl Configurable for ModelOllamaConfigComponent {
     }
 
     async fn apply_settings(&self, settings: Value) -> Result<(), ConfigError> {
-        let parsed: ModelOllamaSettings = serde_json::from_value(settings).unwrap_or_else(|e| {
-            warn!(
-                "failed to parse settings for {}, using defaults: {e}",
-                self.component_id()
-            );
-            ModelOllamaSettings::default()
-        });
+        // 解析失败返回错误拒绝保存：静默回退默认会清空已保存的模型配置。
+        let parsed: ModelOllamaSettings = serde_json::from_value(settings)
+            .map_err(|e| ConfigError::ValidationFailed(format!("模型 Ollama 配置解析失败: {e}")))?;
         *self.settings.write() = parsed;
         Ok(())
     }

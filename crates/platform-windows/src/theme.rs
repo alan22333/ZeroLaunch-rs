@@ -16,20 +16,8 @@ use zerolaunch_plugin_api::services::{Theme, ThemeProvider};
 /// Windows 系统主题提供器。
 ///
 /// 读取 Windows 个性化注册表中的应用主题设置；仅由 platform-windows 注入 HostApi 使用。
+#[derive(Default)]
 pub struct WindowsThemeProvider;
-
-impl Default for WindowsThemeProvider {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl WindowsThemeProvider {
-    /// 创建 Windows 系统主题提供器。
-    pub fn new() -> Self {
-        Self
-    }
-}
 
 impl ThemeProvider for WindowsThemeProvider {
     /// 读取 AppsUseLightTheme，将 0 转换为深色，其余有效值转换为浅色。
@@ -122,7 +110,7 @@ impl WindowsThemeListener {
         std::thread::spawn(move || {
             let key = HKEY(key_raw as *mut _);
             let notify_event = HANDLE(notify_event_raw as *mut _);
-            let provider = WindowsThemeProvider::new();
+            let provider = WindowsThemeProvider;
             // 记录启动时的系统主题；注册表通知按键订阅，同键下其他值写入
             // （壁纸/强调色等）也会触发，仅主题值实际变化时才回调
             let mut last_theme = provider.current_system_theme().ok();

@@ -116,6 +116,9 @@ pub enum ModelError {
     /// 网络/传输失败。
     #[error("模型传输失败: {0}")]
     Transport(String),
+    /// 内部错误：宿主执行模型任务时发生未归类故障（如并发任务 join 失败）。
+    #[error("模型内部错误: {0}")]
+    Internal(String),
 }
 
 /// 对话消息角色。

@@ -158,6 +158,9 @@ pub enum ConfirmRequest {
         user_args: Vec<String>,
         /// 前端最后一次观测到的会话代际。
         generation: u64,
+        /// 前端最后一次观测到的候选缓存世代（refresh_candidates 递增）。
+        /// 后端校验与当前缓存一致，防止刷新后 id 漂移执行错误候选。
+        candidate_generation: u64,
     },
     /// 插件面板动作：自定义能力调用（面板按键契约 Custom / GotoPanel 回插件）。
     PluginAction {
@@ -303,7 +306,7 @@ impl SessionDispatcher {
         let keywords = self.route_keywords_for(plugin.as_ref());
         let conflicts: Vec<&str> = keywords
             .iter()
-            .filter(|kw| self.trigger_index.contains_key(*kw))
+            .filter(|kw| self.trigger_index.contains_key(&kw.to_lowercase()))
             .map(|s| s.as_str())
             .collect();
         if !conflicts.is_empty() {
@@ -345,7 +348,8 @@ impl SessionDispatcher {
     /// 用于 set_plugin_enabled 的启用恢复——注册与启停两条路径共用同一冲突规则。
     fn try_insert_trigger_keywords(&self, plugin_id: &str, keywords: &[String]) {
         for kw in keywords {
-            if let Some(owner) = self.trigger_index.get(kw) {
+            let kw_lower = kw.to_lowercase();
+            if let Some(owner) = self.trigger_index.get(&kw_lower) {
                 if owner.as_str() != plugin_id {
                     error!(
                         "恢复触发词 '{}' 冲突：已被插件 '{}' 占用，跳过（插件 '{}' 的该词不恢复）",
@@ -356,7 +360,7 @@ impl SessionDispatcher {
                     continue;
                 }
             }
-            self.trigger_index.insert(kw.clone(), plugin_id.to_string());
+            self.trigger_index.insert(kw_lower, plugin_id.to_string());
         }
     }
 
@@ -488,6 +492,11 @@ impl SessionDispatcher {
         self.cached_candidates.read().get_candidate(id).cloned()
     }
 
+    /// 当前候选缓存世代（查询响应下发，前端确认回传校验用）。
+    pub fn get_candidates_generation(&self) -> u64 {
+        self.cached_candidates.read().generation()
+    }
+
     /// 获取候选项的快照（计数 + 数据），单次锁获取保证一致性。
     pub fn get_candidates_snapshot(&self) -> (usize, Vec<zerolaunch_plugin_api::SearchCandidate>) {
         let guard = self.cached_candidates.read();
@@ -527,7 +536,10 @@ impl SessionDispatcher {
     pub async fn refresh_candidates(&self) {
         let pipeline = self.candidate_pipeline.read().await;
         let candidates = pipeline.collect().await;
-        let candidates = self.merge_plugin_candidates(candidates);
+        let mut candidates = self.merge_plugin_candidates(candidates);
+        // 全量重建后递增缓存世代：旧确认载荷（携带旧世代）在 route_confirm
+        // 被拒绝，防止刷新后 id 漂移导致确认到错误候选。
+        candidates.bump_generation();
         *self.cached_candidates.write() = Arc::new(candidates);
         *self.last_refresh.lock() = Some(Instant::now());
     }
@@ -635,7 +647,6 @@ impl SessionDispatcher {
         }
         latest != revision
     }
-
     /// 解析触发词与剩余查询内容（首词空格分隔，精确匹配触发词索引）。
     /// 语义：触发词必须带空格分隔（触发词+空格+内容），单独的触发词（无空格）
     /// 不视为命中——前端 queryStillInPanel 镜像同样要求 raw.includes(' ')。
@@ -643,7 +654,11 @@ impl SessionDispatcher {
         let mut parts = raw_query.splitn(2, ' ');
         let first = parts.next().unwrap_or("");
         match parts.next() {
-            Some(rest) if self.trigger_index.contains_key(first) => (Some(first.to_string()), rest),
+            // 触发词索引键统一小写存储（注册时 normalize），查询首词小写化后匹配，
+            // 大小写变体（Translate / translate）均能命中。
+            Some(rest) if self.trigger_index.contains_key(&first.to_lowercase()) => {
+                (Some(first.to_string()), rest)
+            }
             _ => (None, raw_query),
         }
     }
@@ -980,6 +995,7 @@ impl SessionDispatcher {
                 // 默认搜索只处理宿主候选确认；插件面板动作在插件归属分支处理。
                 let ConfirmRequest::Candidate {
                     candidate_id,
+                    candidate_generation,
                     action_id,
                     query_text,
                     user_args,
@@ -995,7 +1011,13 @@ impl SessionDispatcher {
                     SearchSubState::InlineParam { candidate_id }
                     | SearchSubState::ParamPanel { candidate_id } => {
                         match self
-                            .execute_candidate(candidate_id, &action_id, &query_text, &user_args)
+                            .execute_candidate(
+                                candidate_id,
+                                candidate_generation,
+                                &action_id,
+                                &query_text,
+                                &user_args,
+                            )
                             .await
                         {
                             Ok(()) => Ok(RoutedConfirm {
@@ -1027,7 +1049,13 @@ impl SessionDispatcher {
                             });
                         }
                         match self
-                            .execute_candidate(candidate_id, &action_id, &query_text, &user_args)
+                            .execute_candidate(
+                                candidate_id,
+                                candidate_generation,
+                                &action_id,
+                                &query_text,
+                                &user_args,
+                            )
                             .await
                         {
                             Ok(()) => Ok(RoutedConfirm {
@@ -1083,10 +1111,23 @@ impl SessionDispatcher {
     async fn execute_candidate(
         &self,
         candidate_id: CandidateId,
+        candidate_generation: u64,
         action_id: &str,
         query_text: &str,
         user_args: &[String],
     ) -> Result<(), ConfirmError> {
+        // 候选世代校验：缓存刷新（60s 定时/安装监控/配置变更）后 id 重排，
+        // 旧世代确认载荷可能指向错误候选，直接拒绝。
+        {
+            let cached = self.cached_candidates.read();
+            if candidate_generation != 0 && cached.generation() != candidate_generation {
+                return Err(ConfirmError(format!(
+                    "候选缓存已刷新（世代 {} != {}），请重试",
+                    cached.generation(),
+                    candidate_generation
+                )));
+            }
+        }
         // 候选快照后释放锁（record 对远端增强器经 RPC，不跨 await 持锁）
         let (exec_ctx, candidate_snapshot) = {
             let cached = self.cached_candidates.read();
@@ -2211,7 +2252,7 @@ mod tests {
 
         // 统一确认路径：resolve → execute → wake_plugin
         dispatcher
-            .execute_candidate(candidate_id, "open", "", &[])
+            .execute_candidate(candidate_id, 0, "open", "", &[])
             .await
             .expect("插件候选确认应成功");
 

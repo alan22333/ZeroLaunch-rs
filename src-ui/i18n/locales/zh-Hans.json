@@ -19,7 +19,8 @@
     "noResults": "无结果",
     "ready": "就绪",
     "candidates": "{count} 个候选项",
-    "translationStarted": "已开始翻译，请稍候…"
+    "translationStarted": "已开始翻译，请稍候…",
+    "paramLabel": "参数 {n}"
   },
   "translator": {
     "title": "翻译",
@@ -45,7 +46,8 @@
     "modelLoadRetry": "重试",
     "apply": "应用",
     "modeLive": "即时翻译",
-    "modeOnEnter": "按 Enter 翻译"
+    "modeOnEnter": "按 Enter 翻译",
+    "defaultTargetInvalid": "当前保存的默认目标语言不在可用选项中，请重新选择"
   },
   "footer": {
     "settings": "设置",
@@ -92,9 +94,9 @@
     "disabled": "已禁用",
     "dataSource": "数据源",
     "keywordOptimizer": "关键词优化器",
-    "searchEngine": "搜索引擎",
-    "scoreBooster": "分数提升器",
-    "actionExecutor": "动作执行器",
+    "searchEngine": "检索引擎",
+    "scoreBooster": "评分增强器",
+    "actionExecutor": "执行器",
     "noComponents": "无可用组件",
     "noConfigurableFields": "该组件暂无可配置的设置项",
     "selectComponent": "从左侧选择一个组件查看配置",
@@ -163,6 +165,8 @@
       "installConfirmContent": "将安装插件：{name}",
       "installConfirmPositive": "安装",
       "installConfirmNegative": "取消",
+      "installRiskTitle": "安全提示",
+      "installRiskContent": "第三方插件以与本应用同等的权限运行，其界面在宿主窗口内执行（仅样式隔离）。请仅安装来自可信来源的插件。",
       "empty": "暂无插件",
       "config": "配置",
       "noConfig": "无配置",
@@ -222,8 +226,17 @@
       "fieldMaxRestart": "最大重启次数",
       "rawManifest": "查看原始 manifest",
       "builtin": "内置",
-      "openHomepageFailed": "打开主页失败"
-    }
+      "openHomepageFailed": "打开主页失败",
+      "stateStarting": "启动中",
+      "stateStopped": "已停止",
+      "stateCrashed": "已崩溃",
+      "stateError": "启动错误",
+      "stateUnknown": "状态未知",
+      "invalidHomepageUrl": "主页地址无效：仅支持 http/https 链接"
+    },
+    "contentProcessor": "内容处理器",
+    "keywordInjector": "关键字注入器",
+    "biasRule": "固定偏移量"
   },
   "contextMenu": {
     "execute": "执行",

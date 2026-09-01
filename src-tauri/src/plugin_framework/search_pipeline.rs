@@ -75,7 +75,8 @@ impl SearchPipeline {
             booster.boost(&mut scored, candidates, query).await;
         }
 
-        scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+        // total_cmp：NaN 分数（异常引擎/增强器产出）不 panic，按 NaN 最大排序兜底。
+        scored.sort_by(|a, b| b.score.total_cmp(&a.score));
         scored
     }
 

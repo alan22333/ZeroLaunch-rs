@@ -38,6 +38,9 @@ export const useThemeStore = defineStore('theme', () => {
   /** 当前内存中的外观配置缓存（用于主题切换时重新应用配色） */
   let currentAppearanceSettings: Record<string, unknown> = {}
 
+  /** 系统主题事件解绑函数：loadFromBackend 重复调用时先解绑旧监听再注册，避免监听器叠加。 */
+  let unlistenSystemTheme: (() => void) | null = null
+
   async function setTheme(mode: ThemeMode) {
     themeMode.value = mode
     await applyNaiveTheme()
@@ -88,7 +91,11 @@ export const useThemeStore = defineStore('theme', () => {
     // 系统主题唯一数据源：初始值经后端查询（后端读注册表 AppsUseLightTheme），
     // 运行期变化经 system-theme-changed 事件推送（后端注册表监听驱动）。
     // 先注册事件监听再查询：查询窗口期内的事件不丢失，查询值（最新系统值）覆盖语义一致。
-    onSystemThemeChanged((isDark) => {
+    // loadFromBackend 可能被重复调用（多窗口/热更新），先解绑旧监听避免叠加。
+    if (unlistenSystemTheme) {
+      unlistenSystemTheme()
+    }
+    unlistenSystemTheme = await onSystemThemeChanged((isDark) => {
       systemIsDark.value = isDark
       if (themeMode.value === 'system') {
         applyNaiveTheme()

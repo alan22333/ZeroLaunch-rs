@@ -9,6 +9,10 @@ import { i18n } from '@/i18n'
  * 第三方插件面板宿主：插件 UI 资源通过宿主协议动态 import 到宿主 document 的
  * Shadow DOM 容器内执行——键盘事件冒泡到宿主窗口（bindings「声明即接管」生效）、
  * i18n 同步直查、数据/动作直连 IPC。Shadow DOM 保留样式隔离。
+ *
+ * 销毁契约：插件可在 mount 内通过 host.onDestroy(cb) 注册销毁回调，或返回
+ * cleanup 函数作为 mountFn 返回值；宿主卸载面板时统一调用，供插件清理
+ * 定时器 / window 级监听器等资源，避免反复开关面板时线性累积泄漏。
  */
 const props = defineProps<{
   pluginId: string
@@ -24,14 +28,19 @@ const containerRef = ref<HTMLDivElement | null>(null)
 type PanelHost = {
   pluginId: string
   onDataUpdate: (cb: (data: unknown, actions: ResultAction[]) => void) => void
+  onDestroy: (cb: () => void) => void
   t: (key: string, params?: Record<string, unknown>) => string
   executeAction: (action: string, args: unknown) => Promise<void>
   query: (rawQuery: string) => Promise<BridgeQueryResponse>
   exit: () => void
 }
 
-let mountFn: ((rootEl: HTMLElement, host: PanelHost) => void) | null = null
+let mountFn: ((rootEl: HTMLElement, host: PanelHost) => void | (() => void)) | null = null
 let dataUpdateCb: ((data: unknown, actions: ResultAction[]) => void) | null = null
+// 面板销毁回调（host.onDestroy 注册 + mountFn 返回值 cleanup），卸载时统一调用
+let destroyCbs: Array<() => void> = []
+// 卸载标记：动态 import 竞态守卫（import 期间组件已卸载则放弃挂载）
+let disposed = false
 
 /// 面板数据通道：bridge_query 显式指定当前面板插件（QueryChannel::Panel——
 /// 只读辅助路径，不经触发词路由、不改写 GUI 会话），响应为 BridgeQueryResponse
@@ -58,6 +67,10 @@ function buildHost(): PanelHost {
       // 注册后立即重放当前载荷（watch immediate 触发时回调尚未注册，初值已错过）
       cb(props.data, props.actions)
     },
+    /// 面板销毁回调注册：与 mountFn 返回的 cleanup 一起在卸载时执行
+    onDestroy(cb) {
+      destroyCbs.push(cb)
+    },
     /// 面板翻译：自动补插件 id 前缀（与 Rust 侧 t_key 同键格式），key-or-literal；
     /// 支持 vue-i18n 命名插值参数（如 {count}）。
     t(key, params) {
@@ -71,13 +84,13 @@ function buildHost(): PanelHost {
 }
 
 async function loadPanel() {
-	if (!containerRef.value || !props.panelEntryUrl) return
-	const shadow = containerRef.value.attachShadow({ mode: 'open' })
-	// fallback 样式：CSS 变量经宿主继承进 Shadow DOM（inline style 不支持 var()）
-	const style = document.createElement('style')
-	style.textContent =
-		'.fallback { padding: 24px; color: var(--text-error); font-size: var(--font-size-sm); }'
-	shadow.appendChild(style)
+  if (!containerRef.value || !props.panelEntryUrl) return
+  const shadow = containerRef.value.attachShadow({ mode: 'open' })
+  // fallback 样式：CSS 变量经宿主继承进 Shadow DOM（inline style 不支持 var()）
+  const style = document.createElement('style')
+  style.textContent =
+    '.fallback { padding: 24px; color: var(--text-error); font-size: var(--font-size-sm); }'
+  shadow.appendChild(style)
   const mountEl = document.createElement('div')
   mountEl.style.display = 'flex'
   mountEl.style.flex = '1'
@@ -88,34 +101,52 @@ async function loadPanel() {
   try {
     // 动态加载插件资源（CSP 已允许 zlplugin.localhost 源）。
     const mod = await import(/* @vite-ignore */ props.panelEntryUrl)
-		mountFn = mod.default
-		mountFn?.(mountEl, buildHost())
-	} catch (err) {
-		shadow.innerHTML = ''
-		const fallback = document.createElement('div')
-		fallback.className = 'fallback'
-		fallback.textContent = i18n.global.t('pluginPanel.loadError', {
-			message: (err as Error)?.message ?? '',
-		})
-		shadow.appendChild(fallback)
-		console.error('[ThirdPartyPanelHost] 面板加载失败:', err)
-	}
+    // 竞态守卫：import 期间组件已卸载则放弃挂载（shadow root 已悬空）
+    if (disposed) return
+    destroyCbs = []
+    mountFn = mod.default
+    // mountFn 可返回 cleanup 函数（与 host.onDestroy 注册的回调一起于卸载时执行）
+    const cleanup = mountFn?.(mountEl, buildHost())
+    if (typeof cleanup === 'function') destroyCbs.push(cleanup)
+  } catch (err) {
+    if (disposed) return
+    shadow.innerHTML = ''
+    const fallback = document.createElement('div')
+    fallback.className = 'fallback'
+    fallback.textContent = i18n.global.t('pluginPanel.loadError', {
+      message: (err as Error)?.message ?? '',
+    })
+    shadow.appendChild(fallback)
+    console.error('[ThirdPartyPanelHost] 面板加载失败:', err)
+  }
 }
 
 onMounted(loadPanel)
 
 onUnmounted(() => {
+  disposed = true
+  // 卸载时调用插件注册的销毁回调，清理定时器 / window 级监听器等资源
+  for (const cb of destroyCbs) {
+    try {
+      cb()
+    } catch (err) {
+      console.error('[ThirdPartyPanelHost] 面板销毁回调执行失败:', err)
+    }
+  }
+  destroyCbs = []
   mountFn = null
   dataUpdateCb = null
 })
 
-// 面板数据更新（会话推送 data-update 语义：直接调用面板注册的回调）
+// 面板数据更新（会话推送 data-update 语义：直接调用面板注册的回调）。
+// 浅比较：data/actions 引用变化即触发——面板查询返回的大载荷（含 base64 图标）
+// 每次都会生成新引用，深比较全量遍历开销大且无额外价值。
 watch(
   () => [props.data, props.actions],
   () => {
     dataUpdateCb?.(props.data, props.actions)
   },
-  { deep: true, immediate: true },
+  { immediate: true },
 )
 </script>
 

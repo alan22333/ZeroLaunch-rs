@@ -7,6 +7,7 @@ import {
 } from '../bridge/commands'
 import type { ListItem, ResultAction, BridgeQueryResponse, ConfirmResponse, PanelInteraction, SessionStateEvent } from '../bridge/contract'
 import { onSessionState } from '../bridge/events'
+import { i18n } from '../i18n'
 
 /**
  * 会话模式 —— 与后端响应 `BridgeQueryResponse.mode` 同词表（snake_case）。
@@ -74,6 +75,8 @@ export const useSearchStore = defineStore('search', () => {
   const pluginMeta = ref<Record<string, { name: string; icon: string | null; mode: 'inline' | 'panel' }>>({})
   /** 会话代际：随 bridge_query / bridge_confirm 响应单调递增更新，确认请求回传校验。 */
   const currentGeneration = ref(0)
+  /** 候选缓存世代：查询响应下发，确认时回传后端校验（防止缓存刷新后 id 漂移）。 */
+  const currentCandidateGeneration = ref(0)
   /** 防抖定时器 */
   let debounceTimer: number | null = null
 
@@ -262,7 +265,7 @@ export const useSearchStore = defineStore('search', () => {
     // 供插件面板感知「查询处理中」（如翻译面板据此提示「已开始翻译」）。
     panelQueryInFlight.value = queryStillInPanel(raw)
     try {
-      console.log(`[doQuery] Sending query: "${raw}" (seq=${seq})`)
+      // 查询日志由后端 tracing 记录（含脱敏预览），前端不再打印原始输入
       const resp: BridgeQueryResponse = await bridgeQuery(raw, confirm)
 
       if (seq !== querySeq) return
@@ -310,6 +313,10 @@ export const useSearchStore = defineStore('search', () => {
       if (resp.generation >= currentGeneration.value) {
         currentGeneration.value = resp.generation
       }
+      // 同步候选缓存世代（单调递增；旧前端响应无该字段时为 undefined，保持现值）
+      if (resp.candidateGeneration !== undefined && resp.candidateGeneration >= currentCandidateGeneration.value) {
+        currentCandidateGeneration.value = resp.candidateGeneration
+      }
     } catch (e) {
       if (seq !== querySeq) return
       // 查询失败同样解除在途标志，避免后续 Enter 被永久拦截。
@@ -342,6 +349,7 @@ export const useSearchStore = defineStore('search', () => {
         actionId: targetActionId,
         queryText: query.value,
         generation: currentGeneration.value,
+        candidateGeneration: currentCandidateGeneration.value,
       }
       resetSessionAndHide()
       try {
@@ -375,6 +383,7 @@ export const useSearchStore = defineStore('search', () => {
           actionId: targetActionId,
           queryText: query.value,
           generation: currentGeneration.value,
+        candidateGeneration: currentCandidateGeneration.value,
         })
       } catch (e) {
         console.error('[doConfirm] Plugin wake failed:', e)
@@ -394,6 +403,7 @@ export const useSearchStore = defineStore('search', () => {
           actionId: targetActionId,
           queryText: query.value,
           generation: currentGeneration.value,
+        candidateGeneration: currentCandidateGeneration.value,
         })
       } catch (e) {
         console.error('[doConfirm] Search action failed:', e)
@@ -405,9 +415,12 @@ export const useSearchStore = defineStore('search', () => {
         if (resp.generation >= currentGeneration.value) {
           currentGeneration.value = resp.generation
         }
+        if (resp.candidateGeneration !== undefined && resp.candidateGeneration >= currentCandidateGeneration.value) {
+          currentCandidateGeneration.value = resp.candidateGeneration
+        }
         const fields: ParamField[] = Array.from({ length: resp.userArgCount }, (_, i) => ({
           index: i,
-          label: `参数 ${i + 1}`,
+          label: i18n.global.t('search.paramLabel', { n: i + 1 }),
           value: '',
         }))
         sessionMode.value = 'param_panel'
@@ -430,6 +443,7 @@ export const useSearchStore = defineStore('search', () => {
       actionId: targetActionId,
       queryText: query.value,
       generation: currentGeneration.value,
+        candidateGeneration: currentCandidateGeneration.value,
     }
     resetSessionAndHide()
     try {
@@ -475,6 +489,7 @@ export const useSearchStore = defineStore('search', () => {
       queryText: triggerKeyword,
       userArgs: args,
       generation: currentGeneration.value,
+        candidateGeneration: currentCandidateGeneration.value,
     }
     resetSessionAndHide()
     try {
@@ -512,6 +527,7 @@ export const useSearchStore = defineStore('search', () => {
       queryText: query.value,
       userArgs,
       generation: currentGeneration.value,
+        candidateGeneration: currentCandidateGeneration.value,
     }
     resetSessionAndHide()
     try {
@@ -667,7 +683,7 @@ export const useSearchStore = defineStore('search', () => {
   return {
     query, results, selectedIndex, selectedActionIndex, sessionMode, cachedCount,
     panelType, panelData, panelActions, panelInteraction,
-    currentGeneration, currentPluginId, pluginMeta,
+    currentGeneration, currentCandidateGeneration, currentPluginId, pluginMeta,
     panelQueryInFlight,
     confirmInFlight,
     inlineParamState, paramPanelState,

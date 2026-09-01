@@ -17,6 +17,8 @@ use zerolaunch_plugin_api::services::model::ModelEmbeddingRequest;
 pub const CACHE_DOMAIN: &str = "model-embedding";
 /// L1 内存缓存条数上限。
 const L1_CAPACITY: usize = 4096;
+/// L2 磁盘缓存条数上限（必须大于 L1：L1 是热数据 LRU，L2 是全量落盘）。
+const L2_MAX_ENTRIES: usize = 4096 * 4;
 /// L2 文件 magic（ZLEB + version 1，小端 f32）。
 const L2_MAGIC: &[u8; 4] = b"ZLEB";
 const L2_VERSION: u8 = 1;
@@ -135,11 +137,19 @@ impl EmbeddingCache {
         tauri::async_runtime::spawn(async move {
             if let Err(e) = handle.cache_put(CACHE_DOMAIN, &rel, &data).await {
                 tracing::warn!("embedding 缓存落盘失败: {}", e);
+                return;
+            }
+            // 容量控制：L2 超过上限时删除最旧条目（按修改时间），防磁盘无限膨胀。
+            if let Err(e) = handle.cache_cleanup(CACHE_DOMAIN, L2_MAX_ENTRIES).await {
+                tracing::debug!("embedding L2 容量清理失败: {}", e);
             }
         });
     }
 }
 
+/// 扫描 L2 缓存目录，超过 L2_MAX_ENTRIES 时按修改时间删除最旧条目。
+/// 目录结构：<cache_root>/<plugin_id>/<domain>/<sha前2>/<sha>.bin。
+/// 失败仅告警（容量控制是尽力而为，不影响缓存写入）。
 #[cfg(test)]
 mod tests {
     use super::*;

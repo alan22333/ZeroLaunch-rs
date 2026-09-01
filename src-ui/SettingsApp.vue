@@ -17,9 +17,8 @@ import {
   NNotificationProvider,
   NMessageProvider,
   NDialogProvider,
-  zhCN,
-  enUS,
 } from 'naive-ui'
+import { naiveLocaleFor } from './utils/locale'
 import { useThemeStore } from './stores/theme-store'
 import { configGetSettings } from './bridge/commands'
 import { i18n, setLocale, type Locale } from './i18n'
@@ -29,7 +28,7 @@ import SettingsView from './views/SettingsView.vue'
 
 const themeStore = useThemeStore()
 
-const naiveLocale = ref(i18n.global.locale.value === 'en' ? enUS : zhCN)
+const naiveLocale = ref(naiveLocaleFor(i18n.global.locale.value))
 
 let unlistenAppearance: (() => void) | null = null
 let unlistenGeneral: (() => void) | null = null
@@ -52,7 +51,7 @@ onMounted(async () => {
       if (result.langChanged) {
         setLocale(result.newLang)
         refreshPluginTranslations(result.newLang)
-        naiveLocale.value = result.newLang === 'en' ? enUS : zhCN
+        naiveLocale.value = naiveLocaleFor(result.newLang)
       }
     }).catch(() => {})
   })

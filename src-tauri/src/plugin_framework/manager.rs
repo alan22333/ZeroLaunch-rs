@@ -28,8 +28,13 @@ use zerolaunch_plugin_host::manager::{
 };
 use zerolaunch_plugin_protocol::Manifest;
 
+use super::host_handler::TauriHostCallHandler;
+use super::plugin_info::InstallError;
+use super::plugin_installer::validate_plugin_id;
+use super::plugin_installer::PluginInstaller;
 use crate::core::config::event::{PluginEventSender, PluginRuntimeEvent};
 use crate::core::config::manager::ConfigManager;
+use crate::core::i18n::I18nManager;
 use crate::plugin_framework::builtin_registry;
 use crate::plugin_framework::builtin_registry::{CollectedBuiltins, InventoryContext};
 use crate::plugin_framework::zlplugin_protocol::ZlpluginProtocolHandler;
@@ -50,11 +55,6 @@ fn check_panel_ui_contract(plugin_id: &str, metadata: &PluginMetadata, manifest:
         );
     }
 }
-
-use super::host_handler::TauriHostCallHandler;
-use super::plugin_info::InstallError;
-use super::plugin_installer::PluginInstaller;
-use crate::core::i18n::I18nManager;
 
 /// PluginManager 内部错误类型。
 /// 在 commands/ 层通过 From 转换为 BridgeError。
@@ -299,8 +299,25 @@ impl PluginManager {
         plugin_id: &str,
         tail_lines: usize,
     ) -> Result<Vec<String>, PluginManagerError> {
+        // 入口边界校验：plugin_id 拼接进日志路径，未经校验可读任意 .log 文件。
+        validate_plugin_id(plugin_id).map_err(|e| PluginManagerError::Internal(e.to_string()))?;
         let hm = self.host_manager();
         let log_file = hm.log_dir_root.join(format!("{}.log", plugin_id));
+        // 日志目录边界复核（canonicalize 防符号链接逃逸）。
+        if log_file.exists() {
+            let canonical = log_file.canonicalize().map_err(|e| {
+                PluginManagerError::Internal(format!("Cannot resolve log file: {}", e))
+            })?;
+            let log_root = hm.log_dir_root.canonicalize().map_err(|e| {
+                PluginManagerError::Internal(format!("Cannot resolve log dir: {}", e))
+            })?;
+            if !canonical.starts_with(&log_root) {
+                return Err(PluginManagerError::Internal(format!(
+                    "日志文件超出日志目录，拒绝读取: {}",
+                    canonical.display()
+                )));
+            }
+        }
 
         let mut file = match std::fs::File::open(&log_file) {
             Ok(f) => f,
@@ -518,6 +535,9 @@ impl PluginManager {
         app_handle: Arc<AppHandle>,
     ) -> Result<(), PluginManagerError> {
         info!("Reloading plugin: {}", plugin_id);
+        // 入口边界校验：plugin_id 来自前端命令参数，未经校验的 id 会传入
+        // load_single_plugin 的目录拼装。
+        validate_plugin_id(plugin_id).map_err(|e| PluginManagerError::Internal(e.to_string()))?;
 
         let hm = self.host_manager();
 
@@ -561,7 +581,9 @@ impl PluginManager {
         plugin_id: &str,
         app_handle: Arc<AppHandle>,
     ) -> Result<(), PluginManagerError> {
-        info!("Uninstalling plugin: {}", plugin_id);
+        // 入口边界校验：plugin_id 来自前端命令参数，未经校验的 id 会让
+        // 下方 join/remove_dir_all 逃出 plugins_dir（任意目录删除）。
+        validate_plugin_id(plugin_id).map_err(|e| PluginManagerError::Internal(e.to_string()))?;
 
         let hm = self.host_manager();
 
@@ -572,6 +594,22 @@ impl PluginManager {
             .get(plugin_id)
             .map(|a| a.plugin_dir.clone())
             .unwrap_or_else(|| hm.plugins_dir().join(plugin_id));
+        // 目录边界复核：canonicalize 后必须位于 plugins_dir 内（覆盖手动放置的
+        // 异名目录也在此保护内）。
+        if plugin_dir.exists() {
+            let canonical = plugin_dir.canonicalize().map_err(|e| {
+                PluginManagerError::Internal(format!("Cannot resolve plugin dir: {}", e))
+            })?;
+            let plugins_root = hm.plugins_dir().canonicalize().map_err(|e| {
+                PluginManagerError::Internal(format!("Cannot resolve plugins dir: {}", e))
+            })?;
+            if !canonical.starts_with(&plugins_root) {
+                return Err(PluginManagerError::Internal(format!(
+                    "插件目录超出安装根目录，拒绝删除: {}",
+                    canonical.display()
+                )));
+            }
+        }
 
         if let Some(adapters) = hm.plugins.get(plugin_id) {
             let adapters = adapters.clone();

@@ -14,4 +14,10 @@ export default function mount(rootEl, host) {
       display.textContent = JSON.stringify({ data, actions }, null, 2)
     }
   })
+
+  // 销毁契约：面板卸载时宿主调用该回调，清理定时器 / window 级监听器等资源。
+  // 也可改为让 mount 直接返回 cleanup 函数（等价，二选一）。
+  host.onDestroy(() => {
+    rootEl.innerHTML = ''
+  })
 }

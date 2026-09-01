@@ -1,35 +1,36 @@
-//! HostProxy — provides methods for third-party plugins to call host/* APIs.
+//! HostProxy — 第三方插件调用 host/* API 的代理。
 //!
-//! Each method sends an LSP-framed JSON-RPC request via the shared outbound
-//! channel and awaits the response via a oneshot registered in the shared
-//! pending map. This design avoids the deadlock of the old synchronous
-//! stdin-lock approach by centralizing stdin reads and stdout writes into
-//! dedicated async tasks in `runtime.rs`.
-
+//! 每个方法经共享出站通道发送 LSP 帧 JSON-RPC 请求，并通过注册在共享
+//! pending map 中的 oneshot 等待响应。该设计将 stdin 读取与 stdout 写入
+//! 集中到独立任务，避免旧同步 stdin 锁方案的死锁。
 use dashmap::DashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
-
 use zerolaunch_plugin_api::services::model::{
     ModelChatRequest, ModelChatResponse, ModelEmbeddingRequest, ModelEmbeddingResponse, ModelInfo,
     ModelSimilarityRequest, ModelSimilarityResponse,
 };
+use zerolaunch_plugin_protocol::JsonRpcError;
 
 use base64::Engine as _;
 
 /// Proxy for calling host-side APIs from a plugin subprocess.
 /// Does NOT access stdin/stdout directly — uses channel-based I/O.
 pub struct HostProxy {
+    /// 请求 id 分配器（单调递增，从 1 开始）。
     next_id: AtomicU64,
-    pending: Arc<DashMap<u64, oneshot::Sender<serde_json::Value>>>,
+    /// 在途请求表：id → 响应通道。read_task 完成响应后移除条目。
+    /// 值类型为 `Result`：宿主错误经 Err(JsonRpcError) 返回，调用方区分错误与结果。
+    pending: Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, JsonRpcError>>>>,
+    /// 出站帧通道：write_task 独占消费并写 stdout。
     outbound_tx: mpsc::Sender<Vec<u8>>,
 }
 
 impl HostProxy {
     pub fn new(
-        pending: Arc<DashMap<u64, oneshot::Sender<serde_json::Value>>>,
+        pending: Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, JsonRpcError>>>>,
         outbound_tx: mpsc::Sender<Vec<u8>>,
     ) -> Self {
         Self {
@@ -45,6 +46,24 @@ impl HostProxy {
         &self,
         method: &str,
         params: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        // 模型类方法耗时可能远超普通 host/*（LLM 生成 / 大批量 embedding），
+        // 单独放宽超时；其余方法维持 30s。
+        let is_model_call = method.starts_with("host/model.");
+        let timeout = if is_model_call {
+            Duration::from_secs(300)
+        } else {
+            Duration::from_secs(30)
+        };
+        self.send_request_inner(method, params, timeout).await
+    }
+
+    /// 发送请求并等待响应；超时/通道关闭返回错误字符串。
+    async fn send_request_inner(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+        timeout: Duration,
     ) -> Result<serde_json::Value, String> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let request = serde_json::json!({
@@ -63,18 +82,27 @@ impl HostProxy {
         // Send via the shared channel (write_task writes to stdout).
         // 注意：此处只投递干净 JSON，分帧统一由 write_task 完成，
         // 若在此 encode_frame 会导致双重分帧（帧内嵌套帧），宿主无法解析。
-        self.outbound_tx
-            .send(payload)
-            .await
-            .map_err(|_| "write channel closed".to_string())?;
+        if self.outbound_tx.send(payload).await.is_err() {
+            self.pending.remove(&id);
+            return Err("write channel closed".to_string());
+        }
 
-        // Await the response (read_task completes the oneshot with resp.result).
-        // Apply a 30-second timeout so the plugin doesn't hang forever if
+        // Await the response (read_task completes the oneshot with Result).
+        // Apply a timeout so the plugin doesn't hang forever if
         // the host crashes during request processing.
-        tokio::time::timeout(Duration::from_secs(30), rx)
-            .await
-            .map_err(|_| "host call timed out".to_string())?
-            .map_err(|_| "response channel closed".to_string())
+        match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(Ok(value))) => Ok(value),
+            Ok(Ok(Err(err))) => Err(format!(
+                "host call failed (code {}): {}",
+                err.code, err.message
+            )),
+            Ok(Err(_)) => Err("response channel closed".to_string()),
+            Err(_) => {
+                // 超时：移除 pending 条目，防止长驻插件无界泄漏。
+                self.pending.remove(&id);
+                Err("host call timed out".to_string())
+            }
+        }
     }
 
     pub async fn log(&self, level: &str, message: &str) -> Result<(), String> {
@@ -309,7 +337,7 @@ mod tests {
 
     fn make_proxy() -> (Arc<HostProxy>, mpsc::Receiver<Vec<u8>>) {
         let (tx, rx) = mpsc::channel::<Vec<u8>>(16);
-        let pending: Arc<DashMap<u64, oneshot::Sender<serde_json::Value>>> =
+        let pending: Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, JsonRpcError>>>> =
             Arc::new(DashMap::new());
         (Arc::new(HostProxy::new(pending, tx)), rx)
     }

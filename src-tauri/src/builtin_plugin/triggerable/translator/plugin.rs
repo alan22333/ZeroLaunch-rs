@@ -398,7 +398,10 @@ impl Configurable for TranslatorPlugin {
     }
 
     async fn apply_settings(&self, settings: serde_json::Value) -> Result<(), ConfigError> {
-        let parsed = serde_json::from_value::<TranslatorSettings>(settings).unwrap_or_default();
+        // 解析失败返回错误拒绝保存：unwrap_or_default 会整体静默重置用户配置
+        //（含已配 model_id）。逐字段缺失已由 TranslatorSettings 的 serde(default) 兜底。
+        let parsed = serde_json::from_value::<TranslatorSettings>(settings)
+            .map_err(|e| ConfigError::ValidationFailed(format!("翻译设置解析失败: {e}")))?;
         self.sync_host_model(&parsed);
         *self.inner.write() = parsed;
         Ok(())

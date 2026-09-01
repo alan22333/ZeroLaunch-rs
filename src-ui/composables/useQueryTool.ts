@@ -15,6 +15,9 @@ export function useQueryTool<T>(runner: (input: string) => Promise<T>) {
   const result = ref<T | null>(null)
 
   async function run(): Promise<void> {
+    // loading 守卫：请求在途时忽略新的触发（Enter 连击/重复点击），
+    // 防止慢响应并发覆盖新结果；完成后 loading 复位即可再次触发。
+    if (loading.value) return
     const query = input.value.trim()
     if (!query) return
     loading.value = true

@@ -23,6 +23,10 @@ use zerolaunch_plugin_api::services::model::{
 /// 提供方标识：与 model_id 的 `ollama/` 前缀一致。
 pub const PROVIDER_ID: &str = "ollama";
 
+/// 总超时：模型生成/embedding/本地模型枚举单次调用上限（reqwest 无默认总超时，
+/// 误配 base_url 或服务挂起时会永久阻塞；外层 timeout 兜底）。
+const MODEL_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// 截取 model_id 的模型名部分（去掉 `provider/` 前缀）。
 fn short_model(model_id: &str) -> &str {
     model_id.split_once('/').map(|(_, m)| m).unwrap_or(model_id)
@@ -144,15 +148,15 @@ impl ModelProvider for OllamaProvider {
     }
     /// 返回 endpoint 与模型配置组成的 embedding 缓存命名空间。
     fn cache_namespace(&self) -> String {
-        let models = serde_json::to_string(&self.settings.models).unwrap_or_default();
-        format!("{}:{}:{}", PROVIDER_ID, self.settings.base_url, models)
+        // 仅含 provider + base_url：请求参数已参与 compute_key，全量 models JSON 掺入
+        // 会让无关配置改动清空整个 embedding 缓存。
+        format!("{}:{}", PROVIDER_ID, self.settings.base_url)
     }
 
     async fn list_models(&self) -> Result<Vec<ModelInfo>, ModelError> {
-        let local = self
-            .client()?
-            .list_local_models()
+        let local = tokio::time::timeout(MODEL_CALL_TIMEOUT, self.client()?.list_local_models())
             .await
+            .map_err(|_| ModelError::ProviderUnavailable("模型清单获取超时".to_string()))?
             .map_err(|e| ModelError::ProviderUnavailable(e.to_string()))?;
         let mut models = Vec::new();
         // 空清单 = 全部本地模型按 chat 列出（既有语义）；有声明时按条目 kind 归类，
@@ -185,7 +189,7 @@ impl ModelProvider for OllamaProvider {
                     kind: ModelKind::Embedding {
                         context_window: (config.context_length > 0)
                             .then_some(config.context_length),
-                        dimensions: (config.context_length > 0).then_some(config.dimensions),
+                        dimensions: (config.dimensions > 0).then_some(config.dimensions),
                         similarity: config.similarity,
                         capabilities: config.capabilities.clone(),
                     },
@@ -226,11 +230,13 @@ impl ModelProvider for OllamaProvider {
     async fn chat(&self, req: ModelChatRequest) -> Result<ModelChatResponse, ModelError> {
         let entry = entry_for(&self.settings, &req.model_id);
         let request = build_chat_request(&req, entry)?;
-        let resp = self
-            .client()?
-            .send_chat_messages(request)
-            .await
-            .map_err(|e| ModelError::Transport(e.to_string()))?;
+        let resp = tokio::time::timeout(
+            MODEL_CALL_TIMEOUT,
+            self.client()?.send_chat_messages(request),
+        )
+        .await
+        .map_err(|_| ModelError::Transport("模型调用超时".to_string()))?
+        .map_err(|e| ModelError::Transport(e.to_string()))?;
         Ok(ModelChatResponse {
             model_id: req.model_id,
             content: resp.message.content,
@@ -246,11 +252,13 @@ impl ModelProvider for OllamaProvider {
     ) -> Result<(), ModelError> {
         let entry = entry_for(&self.settings, &req.model_id);
         let request = build_chat_request(&req, entry)?;
-        let stream = self
-            .client()?
-            .send_chat_messages_stream(request)
-            .await
-            .map_err(|e| ModelError::Transport(e.to_string()))?;
+        let stream = tokio::time::timeout(
+            MODEL_CALL_TIMEOUT,
+            self.client()?.send_chat_messages_stream(request),
+        )
+        .await
+        .map_err(|_| ModelError::Transport("模型调用超时".to_string()))?
+        .map_err(|e| ModelError::Transport(e.to_string()))?;
         let mut stream = pin!(stream);
 
         while let Some(chunk) = stream.next().await {
@@ -307,11 +315,13 @@ impl ModelProvider for OllamaProvider {
             }
             request.dimensions = Some(dimensions);
         }
-        let resp = self
-            .client()?
-            .generate_embeddings(request)
-            .await
-            .map_err(|e| ModelError::Transport(e.to_string()))?;
+        let resp = tokio::time::timeout(
+            MODEL_CALL_TIMEOUT,
+            self.client()?.generate_embeddings(request),
+        )
+        .await
+        .map_err(|_| ModelError::Transport("模型调用超时".to_string()))?
+        .map_err(|e| ModelError::Transport(e.to_string()))?;
         let dimensions = resp.embeddings.first().map(|v| v.len()).unwrap_or(0);
         Ok(ModelEmbeddingResponse {
             model_id: req.model_id,

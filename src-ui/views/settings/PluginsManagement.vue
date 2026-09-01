@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { i18n, resolveText, type Locale } from '@/i18n'
 import { refreshPluginTranslations } from '@/stores/i18n-store'
 import {
-  NButton, NDataTable, NTag, NSpace, NText, NModal, NSwitch,
+  NAlert, NButton, NDataTable, NTag, NSpace, NText, NModal, NSwitch,
   NCode, NSpin, NEmpty, NDescriptions, NDescriptionsItem, useMessage, useDialog,
 } from 'naive-ui'
 import type { DataTableColumn } from 'naive-ui'
@@ -141,9 +141,12 @@ const columns: DataTableColumn<PluginRow>[] = [
           { default: () => t(on ? 'settings.thirdPartyPlugins.stateEnabled' : 'settings.thirdPartyPlugins.stateDisabled') },
         )
       }
+      // 运行状态文案：running 专用键，其余状态按 PluginRuntimeState 词表映射为本地化文案
       const running = row.plugin.state === 'running'
       const color = running ? 'success' : 'error'
-      const label = running ? t('settings.thirdPartyPlugins.stateRunning') : row.plugin.state
+      const label = running
+        ? t('settings.thirdPartyPlugins.stateRunning')
+        : t(`settings.thirdPartyPlugins.state${row.plugin.state[0].toUpperCase()}${row.plugin.state.slice(1)}`)
       return h(NTag, { type: color as never }, { default: () => label })
     },
   },
@@ -401,9 +404,22 @@ async function handleViewDetail(pluginId: string) {
   }
 }
 
-/** 用系统浏览器打开插件主页（webview 内 target=_blank 只会开空白窗口，须走 shell 插件）。 */
+/** 用系统浏览器打开插件主页（webview 内 target=_blank 只会开空白窗口，须走 shell 插件）。
+ *  主页来自第三方 manifest，先校验 scheme 白名单（仅 http/https），
+ *  防止恶意插件经 shell open 打开 file:// 等本地资源。 */
 function handleOpenHomepage(url: string) {
-  void open(url).catch(() => {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    message.error(t('settings.thirdPartyPlugins.invalidHomepageUrl'))
+    return
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    message.error(t('settings.thirdPartyPlugins.invalidHomepageUrl'))
+    return
+  }
+  void open(parsed.toString()).catch(() => {
     message.error(t('settings.thirdPartyPlugins.openHomepageFailed'))
   })
 }
@@ -479,6 +495,14 @@ onUnmounted(() => {
       <NText depth="3" style="display: block; margin-top: 8px; word-break: break-all;">
         {{ pendingPath }}
       </NText>
+      <!-- 权限风险提示：第三方插件与宿主同权限执行，UI 仅样式隔离 -->
+      <NAlert
+        style="margin-top: 16px;"
+        type="warning"
+        :title="t('settings.thirdPartyPlugins.installRiskTitle')"
+      >
+        {{ t('settings.thirdPartyPlugins.installRiskContent') }}
+      </NAlert>
       <NSpace style="margin-top: 16px;" justify="end">
         <NButton :disabled="installing" @click="showInstall = false">
           {{ t('settings.thirdPartyPlugins.installConfirmNegative') }}
@@ -572,7 +596,7 @@ onUnmounted(() => {
                 <NTag :type="detailData.state === 'running' ? 'success' : 'error'" size="small">
                   {{ detailData.state === 'running'
                     ? t('settings.thirdPartyPlugins.stateRunning')
-                    : detailData.state }}
+                    : t(`settings.thirdPartyPlugins.state${detailData.state[0].toUpperCase()}${detailData.state.slice(1)}`) }}
                 </NTag>
               </NDescriptionsItem>
               <NDescriptionsItem v-if="detailData.manifest" :label="t('settings.thirdPartyPlugins.fieldHomepage')" :span="2">

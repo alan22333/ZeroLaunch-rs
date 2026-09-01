@@ -253,8 +253,8 @@ fn expand_dotted_keys(value: Value) -> Value {
     Value::Object(out)
 }
 
-/// 按点分段逐层插入：段数 >1 时创建/进入对象节点，最后一段放置值。
-/// 同名段下对象与叶子值混用（如 "a" 与 "a.b"）时对象优先，保证树形合法。
+/// 已存在的叶子值（如先有 "a": "x" 后到 "a.b": "y"）不可无损升级为对象——
+/// 保留旧叶子值并告警，丢弃新子树（避免覆盖丢键）。
 fn insert_expanded(map: &mut serde_json::Map<String, Value>, segments: &[&str], value: Value) {
     if segments.len() == 1 {
         map.insert(segments[0].to_string(), value);
@@ -262,14 +262,16 @@ fn insert_expanded(map: &mut serde_json::Map<String, Value>, segments: &[&str], 
     }
     let seg = segments[0].to_string();
     let entry = map
-        .entry(seg)
+        .entry(seg.clone())
         .or_insert_with(|| Value::Object(serde_json::Map::new()));
     match entry {
         Value::Object(inner) => insert_expanded(inner, &segments[1..], value),
         _ => {
-            let mut inner = serde_json::Map::new();
-            insert_expanded(&mut inner, &segments[1..], value);
-            *entry = Value::Object(inner);
+            warn!(
+                "i18n 键冲突：键 '{}' 先以叶子值存在，忽略其子键 '{}'（保留旧值）",
+                seg,
+                segments[1..].join(".")
+            );
         }
     }
 }

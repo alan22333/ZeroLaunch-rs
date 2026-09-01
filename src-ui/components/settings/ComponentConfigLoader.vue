@@ -33,6 +33,7 @@ import { useConfigStore } from '../../stores/config-store'
 import { usePluginStore } from '../../stores/plugin-store'
 import { onConfigChanged } from '../../bridge/events'
 import { configApplySettings } from '../../bridge/commands'
+import { formatErrorMessage } from '../../utils/errors'
 import type { ComponentInfo, ComponentSchema } from '../../bridge/contract'
 
 const props = withDefaults(defineProps<{
@@ -76,7 +77,7 @@ async function onThirdPartySave(newSettings: unknown) {
     await init()
   } catch (e) {
     message.error(t('settings.saveFailed'))
-    loadErr.value = String(e)
+    loadErr.value = formatErrorMessage(e)
   }
 }
 
@@ -98,7 +99,7 @@ async function init() {
       settings.value = cfg as Record<string, unknown>
     }
   } catch (e) {
-    loadErr.value = String(e)
+    loadErr.value = formatErrorMessage(e)
   } finally {
     loading.value = false
   }

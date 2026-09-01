@@ -332,6 +332,7 @@ fn model_error_message(e: &ModelError) -> String {
         ModelError::ProviderUnavailable(detail) => format!("模型提供方不可用: {detail}"),
         ModelError::InvalidRequest(detail) => format!("模型请求参数非法: {detail}"),
         ModelError::Transport(detail) => format!("模型传输失败: {detail}"),
+        ModelError::Internal(detail) => format!("模型内部错误: {detail}"),
     }
 }
 
@@ -403,7 +404,8 @@ impl TranslationProvider for HostModelProvider {
                 phonetic,
                 computer_sense,
                 more_senses,
-                Some(req.source.clone()),
+                // 仅显式源语言回传；auto（自动检测）时模型不回报检测结果，置 None。
+                (!req.source.eq_ignore_ascii_case("auto")).then(|| req.source.clone()),
             )
             .normalize_senses(),
             Err(e) => {

@@ -8,7 +8,6 @@ use reqwest::Client as HttpClient;
 use serde::Deserialize;
 use serde_json::Value;
 use std::time::Duration;
-use tracing::warn;
 use zerolaunch_plugin_api::config::{
     ComponentCore, ComponentType, ConfigActionDef, ConfigError, Configurable, DataActionBinding,
     SettingDefinition,
@@ -275,13 +274,9 @@ impl Configurable for ModelOpenAiConfigComponent {
     }
 
     async fn apply_settings(&self, settings: Value) -> Result<(), ConfigError> {
-        let parsed: ModelOpenAiSettings = serde_json::from_value(settings).unwrap_or_else(|e| {
-            warn!(
-                "failed to parse settings for {}, using defaults: {e}",
-                self.component_id()
-            );
-            ModelOpenAiSettings::default()
-        });
+        // 解析失败返回错误拒绝保存：静默回退默认会清空已保存的模型清单与 api_key。
+        let parsed: ModelOpenAiSettings = serde_json::from_value(settings)
+            .map_err(|e| ConfigError::ValidationFailed(format!("模型 OpenAI 配置解析失败: {e}")))?;
         *self.settings.write() = parsed;
         Ok(())
     }
@@ -305,7 +300,7 @@ impl Configurable for ModelOpenAiConfigComponent {
                 };
                 let url = format!("{}/models", base_url.trim_end_matches('/'));
                 let client = HttpClient::builder()
-                    .timeout(Duration::from_millis(500))
+                    .timeout(Duration::from_secs(8))
                     .build()
                     .map_err(|e| format!("创建模型列表客户端失败: {e}"))?;
                 let mut request = client.get(url);

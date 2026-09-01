@@ -4,7 +4,8 @@ import { pluginList, pluginGetManifest } from '@/bridge/commands'
 import { onPluginInstalled, onPluginUninstalled } from '@/bridge/events'
 import ThirdPartyPanelHost from '@/plugins/third-party-host/ThirdPartyPanelHost.vue'
 import ThirdPartySettingsHost from '@/plugins/third-party-host/ThirdPartySettingsHost.vue'
-import { h } from 'vue'
+import type { ResultAction } from '@/bridge/contract'
+import { defineComponent, h } from 'vue'
 
 interface GlobEntry {
   default: FrontendPlugin
@@ -21,8 +22,8 @@ const registeredThirdPartyIds = new Set<string>()
  * 构造 WebView 可加载的第三方插件资源 URL。
  * 拼上插件版本：升级后 URL 变化，ESM Module Map 不再按旧 URL 返回缓存模块。
  */
-function buildPluginAssetUrl(pluginId: string, entry: string, version: string): string {
-  return `http://zlplugin.localhost/${pluginId}/${entry.replace(/^\/+/, '')}?v=${encodeURIComponent(version)}`
+function buildPluginAssetUrl(pluginId: string, entry: string, versionKey: string): string {
+  return `http://zlplugin.localhost/${pluginId}/${entry.replace(/^\/+/, '')}?v=${encodeURIComponent(versionKey)}`
 }
 
 export function usePluginManager() {
@@ -64,24 +65,34 @@ export function usePluginManager() {
     if (!ui) return
 
     const pluginId = info.pluginId
+    // E-3：URL 版本键用安装时间戳（每次注册唯一，重装/覆盖必然变化），
+    // 不用开发者可控的 manifest version——避免同版本重装仍命中 ESM 缓存。
+    const installStamp = Date.now().toString(36)
 
-    // Dedup: skip if already registered
+    // 去重：仅跳过「本次会话内已注册且未卸载」的重复注册（启动加载路径）。
+    // 事件路径（安装/重装/覆盖）在调用前已 unregister，此处不拦。
     if (registeredThirdPartyIds.has(pluginId)) return
     registeredThirdPartyIds.add(pluginId)
 
     if (ui.panelEntry) {
-      const panelEntryUrl = buildPluginAssetUrl(pluginId, ui.panelEntry as string, info.version)
-      const wrapper = {
-        setup(props: { data: unknown; actions: unknown[] }) {
+      const panelEntryUrl = buildPluginAssetUrl(pluginId, ui.panelEntry as string, installStamp)
+      // 显式 defineComponent + props/emits 声明：不声明则监听器走 attrs 透传
+      // 与 emit 双路径，导致 save 双触发（IPC×2/toast×2）。
+      const wrapper = defineComponent({
+        props: {
+          data: { type: Object as () => unknown, required: true },
+          actions: { type: Array as () => ResultAction[], required: true },
+        },
+        setup(props) {
           return () =>
             h(ThirdPartyPanelHost, {
               pluginId,
               panelEntryUrl,
               data: props.data,
-              actions: props.actions as never[],
+              actions: props.actions,
             })
         },
-      }
+      })
       await pluginStore.registerPlugin({
         id: `third-party-${pluginId}-panel`,
         name: `${info.name} Panel`,
@@ -89,18 +100,20 @@ export function usePluginManager() {
         description: '',
         panelProvider: {
           matchType: `third-party:${pluginId}`,
-          component: wrapper as never,
+          component: wrapper,
         },
       })
     }
 
     if (ui.settingsEntry) {
-      const settingsEntryUrl = buildPluginAssetUrl(pluginId, ui.settingsEntry as string, info.version)
-      const wrapper = {
-        setup(
-          props: { currentSettings: unknown },
-          { emit }: { emit: (e: string, v: unknown) => void },
-        ) {
+      const settingsEntryUrl = buildPluginAssetUrl(pluginId, ui.settingsEntry as string, installStamp)
+      // 同 panel wrapper：显式声明 emits 避免 save 双触发
+      const wrapper = defineComponent({
+        props: {
+          currentSettings: { type: Object as () => unknown, default: undefined },
+        },
+        emits: ['save'],
+        setup(props, { emit }) {
           return () =>
             h(ThirdPartySettingsHost, {
               pluginId,
@@ -109,7 +122,7 @@ export function usePluginManager() {
               onSave: (s: unknown) => emit('save', s),
             })
         },
-      }
+      })
       await pluginStore.registerPlugin({
         id: `third-party-${pluginId}-settings`,
         name: `${info.name} Settings`,
@@ -117,7 +130,7 @@ export function usePluginManager() {
         description: '',
         settingsProvider: {
           matchComponentId: pluginId,
-          component: wrapper as never,
+          component: wrapper,
         },
       })
     }
@@ -137,7 +150,9 @@ export function usePluginManager() {
 
     onPluginInstalled(async (payload) => {
       try {
-        // If we already registered this one, skip
+        // 覆盖安装/重装：先卸载旧注册（清 ESM Module Map 缓存）再注册新 URL，
+        // 否则同版本重装 URL 不变仍命中旧模块（E-3）。
+        await unregisterThirdPartyPlugin(payload.pluginId)
         const manifest = await pluginGetManifest(payload.pluginId) as Record<string, unknown>
         await registerThirdPartyPlugin(
           { pluginId: payload.pluginId, name: payload.name ?? '', version: payload.version ?? '' },

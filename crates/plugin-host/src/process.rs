@@ -548,7 +548,7 @@ pub(crate) fn force_kill_process(pid: u32) {
     #[cfg(target_os = "windows")]
     {
         let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/PID", &pid.to_string()])
+            .args(["/F", "/T", "/PID", &pid.to_string()])
             .output();
     }
     #[cfg(not(target_os = "windows"))]

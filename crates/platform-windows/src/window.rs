@@ -48,6 +48,20 @@ impl WindowManager for WindowsWindowManager {
         }
     }
 
+    /// 根据进程 PID 激活已存在的窗口。
+    /// 枚举窗口匹配 GetWindowThreadProcessId 的可见窗口，调用 SwitchToThisWindow 激活。
+    async fn activate_window_by_pid(&self, pid: u32) -> Result<bool, HostApiError> {
+        let hwnd = get_window_by_pid(pid);
+        if let Some(hwnd) = hwnd {
+            unsafe {
+                SwitchToThisWindow(hwnd, true);
+            }
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     /// 根据窗口标题的部分内容激活已存在的窗口。
     /// 枚举所有可见窗口，标题匹配后调用 SwitchToThisWindow 激活。
     async fn activate_window_by_title(&self, title: &str) -> Result<bool, HostApiError> {
@@ -155,6 +169,24 @@ fn get_window_by_process_name(process_name: &str) -> Option<HWND> {
         let _ = CloseHandle(snapshot);
     }
     result
+}
+
+/// 根据进程 PID 查找目标窗口句柄。
+/// 枚举全部可见窗口，匹配 GetWindowThreadProcessId 属于该 pid 的窗口。
+fn get_window_by_pid(pid: u32) -> Option<HWND> {
+    let mut window_data = WindowEnumData {
+        process_id: pid,
+        hwnd: None,
+    };
+
+    unsafe {
+        let _ = EnumWindows(
+            Some(find_process_window),
+            LPARAM(&mut window_data as *mut _ as isize),
+        );
+    }
+
+    window_data.hwnd
 }
 
 /// 根据窗口标题的部分内容查找窗口句柄（不区分大小写）。

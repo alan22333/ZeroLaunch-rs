@@ -87,10 +87,10 @@ export interface SessionStateEvent {
 }
 
 export type BridgeQueryResponse =
-  | { mode: 'search'; generation: number; results: ListItem[]; panelType: null; panelData: null; panelActions: null; inlineParam: null }
-  | { mode: 'plugin_panel'; generation: number; results: ListItem[]; panelType: string; panelData: unknown; panelActions: ResultAction[]; inlineParam: null }
-  | { mode: 'plugin_immersive'; generation: number; results: ListItem[]; panelType: string; panelData: unknown; panelActions: ResultAction[]; inlineParam: null }
-  | { mode: 'inline_param'; generation: number; results: never[]; panelType: null; panelData: null; panelActions: null; inlineParam: InlineParamData }
+  | { mode: 'search'; generation: number; candidateGeneration: number; results: ListItem[]; panelType: null; panelData: null; panelActions: null; inlineParam: null }
+  | { mode: 'plugin_panel'; generation: number; candidateGeneration: number; results: ListItem[]; panelType: string; panelData: unknown; panelActions: ResultAction[]; inlineParam: null }
+  | { mode: 'plugin_immersive'; generation: number; candidateGeneration: number; results: ListItem[]; panelType: string; panelData: unknown; panelActions: ResultAction[]; inlineParam: null }
+  | { mode: 'inline_param'; generation: number; candidateGeneration: number; results: never[]; panelType: null; panelData: null; panelActions: null; inlineParam: InlineParamData }
 
 /**
  * 确认请求 —— `bridge_confirm` 的 IPC 载荷（与后端 ConfirmRequestPayload tagged union 对齐）：
@@ -116,6 +116,8 @@ export type ConfirmRequest =
       userArgs?: string[]
       /** 会话代际：最后一次观测到的代际，后端据此拒绝过期确认（必填）。 */
       generation: number
+      /** 候选缓存世代：最后一次观测到的世代（查询响应下发），后端校验防 id 漂移。 */
+      candidateGeneration: number
     }
   | {
       kind: 'pluginAction'
@@ -127,12 +129,13 @@ export type ConfirmRequest =
     }
 
 export type ConfirmResponse =
-  | { status: 'executed'; generation: number }
+  | { status: 'executed'; generation: number; candidateGeneration: number }
   | {
       status: 'enterParamPanel'
       candidateId: number
       userArgCount: number
       generation: number
+      candidateGeneration: number
     }
 
 // ---- 配置相关新类型（SchemaKind 驱动） ----

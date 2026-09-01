@@ -91,15 +91,25 @@ onMounted(async () => {
   await loadHostModels()
 })
 
+// 保存的 default_target 不在语言选项内时仅提示，不静默改写已保存值；
+// 用户下次保存（或修改该字段）时再校正，避免就绪即丢失用户配置。
+const defaultTargetInvalid = ref(false)
+
 watch(
   languageOptions,
   (opts) => {
-    if (opts.length > 0 && !opts.some((o) => o.value === local.default_target)) {
-      local.default_target = opts[0].value
+    if (opts.length > 0) {
+      defaultTargetInvalid.value = !opts.some((o) => o.value === local.default_target)
     }
   },
   { immediate: true },
 )
+
+/** 语言选项下拉：值不在选项内时提示重新选择（配合 defaultTargetInvalid 警告）。 */
+function onDefaultTargetChange(val: string) {
+  local.default_target = val
+  defaultTargetInvalid.value = !languageOptions.value.some((o) => o.value === val)
+}
 
 // 选项数组用 computed：随界面语言切换（t 响应 locale）重新求值。
 const translateModeOptions = computed(() => [
@@ -184,7 +194,11 @@ async function onSave() {
               :options="languageOptions"
               filterable
               class="control-full"
+              @update:value="onDefaultTargetChange"
             />
+            <p v-if="defaultTargetInvalid" class="field-hint field-hint-warn">
+              {{ $t('translator.defaultTargetInvalid') }}
+            </p>
           </div>
         </div>
         <div class="form-field">
@@ -292,6 +306,9 @@ async function onSave() {
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
   line-height: 1.5;
+}
+.field-hint-warn {
+  color: var(--text-error);
 }
 
 .model-load-error {

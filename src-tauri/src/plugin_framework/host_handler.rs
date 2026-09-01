@@ -108,7 +108,7 @@ impl HostCallHandler for TauriHostCallHandler {
                 let p: zerolaunch_plugin_protocol::WindowActivateParams = from_value(params)
                     .map_err(|e| JsonRpcError::new(codes::INVALID_PARAMS, e.to_string()))?;
                 handle
-                    .activate_window_by_process(&p.pid.to_string())
+                    .activate_window_by_pid(p.pid)
                     .await
                     .map_err(|e| JsonRpcError::new(codes::PLUGIN_ERROR, e.to_string()))?;
                 Ok(serde_json::Value::Null)
@@ -135,10 +135,18 @@ impl HostCallHandler for TauriHostCallHandler {
                     "AppConfigDir" => {
                         zerolaunch_plugin_api::services::path::KnownPath::AppConfigDir
                     }
+                    "AppCacheDir" => zerolaunch_plugin_api::services::path::KnownPath::AppCacheDir,
+                    "AppLogDir" => zerolaunch_plugin_api::services::path::KnownPath::AppLogDir,
                     "AppIconCacheDir" => {
                         zerolaunch_plugin_api::services::path::KnownPath::AppIconCacheDir
                     }
-                    _ => zerolaunch_plugin_api::services::path::KnownPath::AppDataDir,
+                    // 未知 kind：返回错误而非静默回退 AppDataDir，避免路径语义漂移。
+                    _ => {
+                        return Err(JsonRpcError::new(
+                            codes::INVALID_PARAMS,
+                            format!("未知的路径类型: {}", p.kind),
+                        ));
+                    }
                 };
                 let path = handle
                     .resolve_path(known_path)
@@ -231,10 +239,7 @@ impl HostCallHandler for TauriHostCallHandler {
                 let req: zerolaunch_plugin_api::services::model::ModelChatRequest =
                     from_value(params)
                         .map_err(|e| JsonRpcError::new(codes::INVALID_PARAMS, e.to_string()))?;
-                let resp = handle
-                    .model_chat(req)
-                    .await
-                    .map_err(|e| JsonRpcError::new(codes::PLUGIN_ERROR, e.to_string()))?;
+                let resp = handle.model_chat(req).await.map_err(model_error_to_rpc)?;
                 Ok(serde_json::to_value(resp).unwrap_or_default())
             }
             // 按 model_id 调用文本向量化。
@@ -245,7 +250,7 @@ impl HostCallHandler for TauriHostCallHandler {
                 let resp = handle
                     .model_embedding(req)
                     .await
-                    .map_err(|e| JsonRpcError::new(codes::PLUGIN_ERROR, e.to_string()))?;
+                    .map_err(model_error_to_rpc)?;
                 Ok(serde_json::to_value(resp).unwrap_or_default())
             }
             // 按 model_id 计算查询向量与多个目标向量的相似度。
@@ -256,7 +261,7 @@ impl HostCallHandler for TauriHostCallHandler {
                 let resp = handle
                     .model_similarity(req)
                     .await
-                    .map_err(|e| JsonRpcError::new(codes::PLUGIN_ERROR, e.to_string()))?;
+                    .map_err(model_error_to_rpc)?;
                 Ok(serde_json::to_value(resp).unwrap_or_default())
             }
             _ => Err(JsonRpcError::new(
@@ -265,4 +270,18 @@ impl HostCallHandler for TauriHostCallHandler {
             )),
         }
     }
+}
+/// 将模型服务错误映射为 JSON-RPC 错误（专用错误码 + 原始消息）。
+/// 插件经 host/model.* 调用可区分 ModelNotFound / ProviderUnavailable 等语义。
+fn model_error_to_rpc(e: zerolaunch_plugin_api::services::model::ModelError) -> JsonRpcError {
+    use zerolaunch_plugin_api::services::model::ModelError;
+    let (code, message) = match e {
+        ModelError::NotSupported => (codes::MODEL_NOT_SUPPORTED, e.to_string()),
+        ModelError::ModelNotFound(_) => (codes::MODEL_NOT_FOUND, e.to_string()),
+        ModelError::ProviderUnavailable(_) => (codes::MODEL_PROVIDER_UNAVAILABLE, e.to_string()),
+        ModelError::InvalidRequest(_) => (codes::MODEL_INVALID_REQUEST, e.to_string()),
+        ModelError::Transport(_) => (codes::MODEL_TRANSPORT, e.to_string()),
+        ModelError::Internal(_) => (codes::INTERNAL_ERROR, e.to_string()),
+    };
+    JsonRpcError::new(code, message)
 }

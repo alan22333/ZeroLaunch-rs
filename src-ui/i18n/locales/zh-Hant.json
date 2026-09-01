@@ -19,7 +19,8 @@
     "noResults": "無結果",
     "ready": "就緒",
     "candidates": "{count} 個候選項",
-    "translationStarted": "已開始翻譯，請稍候…"
+    "translationStarted": "已開始翻譯，請稍候…",
+    "paramLabel": "參數 {n}"
   },
   "translator": {
     "title": "翻譯",
@@ -45,7 +46,8 @@
     "modelLoadRetry": "重試",
     "apply": "應用",
     "modeLive": "即時翻譯",
-    "modeOnEnter": "按 Enter 翻譯"
+    "modeOnEnter": "按 Enter 翻譯",
+    "defaultTargetInvalid": "目前儲存的預設目標語言不在可用選項中，請重新選擇"
   },
   "footer": {
     "settings": "設定",
@@ -92,9 +94,9 @@
     "disabled": "已停用",
     "dataSource": "資料來源",
     "keywordOptimizer": "關鍵詞最佳化器",
-    "searchEngine": "搜尋引擎",
-    "scoreBooster": "分數提升器",
-    "actionExecutor": "動作執行器",
+    "searchEngine": "檢索引擎",
+    "scoreBooster": "評分增強器",
+    "actionExecutor": "執行器",
     "noComponents": "無可用元件",
     "noConfigurableFields": "該元件暫無可配置的設定項",
     "selectComponent": "從左側選擇一個元件檢視配置",
@@ -163,6 +165,8 @@
       "installConfirmContent": "將安裝插件：{name}",
       "installConfirmPositive": "安裝",
       "installConfirmNegative": "取消",
+      "installRiskTitle": "安全提示",
+      "installRiskContent": "第三方插件以與本應用程式同等的權限執行，其介面在宿主視窗內執行（僅樣式隔離）。請僅安裝來自可信來源的插件。",
       "empty": "暫無插件",
       "config": "配置",
       "noConfig": "無配置",
@@ -222,8 +226,17 @@
       "fieldMaxRestart": "最大重啟次數",
       "rawManifest": "檢視原始 manifest",
       "builtin": "內建",
-      "openHomepageFailed": "開啟主頁失敗"
-    }
+      "openHomepageFailed": "開啟主頁失敗",
+      "stateStarting": "啟動中",
+      "stateStopped": "已停止",
+      "stateCrashed": "已崩潰",
+      "stateError": "啟動錯誤",
+      "stateUnknown": "狀態未知",
+      "invalidHomepageUrl": "主頁位址無效：僅支援 http/https 連結"
+    },
+    "contentProcessor": "內容處理器",
+    "keywordInjector": "關鍵字注入器",
+    "biasRule": "固定偏移量"
   },
   "contextMenu": {
     "execute": "執行",

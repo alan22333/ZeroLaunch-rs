@@ -135,6 +135,11 @@ impl PluginHandle {
         }
     }
 
+    /// 返回当前插件 ID（宿主模型缓存等按插件隔离目录需要）。
+    pub fn plugin_id(&self) -> &str {
+        &self.plugin_id
+    }
+
     /// 获取当前图标缓存等级，None 时返回默认值 Full。
     fn icon_cache_level(&self) -> CacheLevel {
         self.config.read().icon_cache_level.unwrap_or_default()
@@ -258,6 +263,13 @@ impl PluginHandle {
     /// 返回：成功激活返回 Ok(true)，未找到窗口返回 Ok(false)，失败返回 HostApiError。
     pub async fn activate_window_by_title(&self, title: &str) -> Result<bool, HostApiError> {
         self.window_manager.activate_window_by_title(title).await
+    }
+
+    /// 根据进程 PID 激活已存在的窗口。
+    /// 参数：pid - 进程标识符。
+    /// 返回：成功激活返回 Ok(true)，未找到窗口返回 Ok(false)，失败返回 HostApiError。
+    pub async fn activate_window_by_pid(&self, pid: u32) -> Result<bool, HostApiError> {
+        self.window_manager.activate_window_by_pid(pid).await
     }
 
     // ===== 路径服务 =====
@@ -641,6 +653,74 @@ impl PluginHandle {
                 reason: format!("删除缓存文件失败: {}", e),
             }),
         }
+    }
+
+    /// 容量控制：缓存域条目超过 max_entries 时按修改时间删除最旧条目。
+    /// 目录结构 <cache_root>/<plugin_id>/<domain>/<sha前2>/<sha>.bin（两级分片）。
+    /// 参数：domain - 缓存域；max_entries - 条目数上限。
+    /// 返回：成功返回 Ok(())（目录不存在视为无需清理）。
+    pub async fn cache_cleanup(
+        &self,
+        domain: &str,
+        max_entries: usize,
+    ) -> Result<(), HostApiError> {
+        let cache_root = self.resolve_path(KnownPath::AppCacheDir)?;
+        let domain_dir = std::path::Path::new(&cache_root)
+            .join(&self.plugin_id)
+            .join(domain);
+        if !domain_dir.exists() {
+            return Ok(());
+        }
+
+        // 收集全部条目（含两级分片目录）及其修改时间
+        let mut entries: Vec<(std::time::SystemTime, std::path::PathBuf)> = Vec::new();
+        for sub in
+            std::fs::read_dir(&domain_dir).map_err(|e| HostApiError::StorageOperationFailed {
+                file: domain_dir.to_string_lossy().to_string(),
+                reason: format!("读取缓存目录失败: {}", e),
+            })?
+        {
+            let sub = sub.map_err(|e| HostApiError::StorageOperationFailed {
+                file: domain_dir.to_string_lossy().to_string(),
+                reason: format!("读取缓存子目录失败: {}", e),
+            })?;
+            if !sub.path().is_dir() {
+                continue;
+            }
+            for file in
+                std::fs::read_dir(sub.path()).map_err(|e| HostApiError::StorageOperationFailed {
+                    file: sub.path().to_string_lossy().to_string(),
+                    reason: format!("读取缓存分片目录失败: {}", e),
+                })?
+            {
+                let file = file.map_err(|e| HostApiError::StorageOperationFailed {
+                    file: sub.path().to_string_lossy().to_string(),
+                    reason: format!("读取缓存条目失败: {}", e),
+                })?;
+                let meta = file
+                    .metadata()
+                    .map_err(|e| HostApiError::StorageOperationFailed {
+                        file: file.path().to_string_lossy().to_string(),
+                        reason: format!("读取缓存条目元数据失败: {}", e),
+                    })?;
+                if meta.is_file() {
+                    entries.push((
+                        meta.modified().unwrap_or(std::time::UNIX_EPOCH),
+                        file.path(),
+                    ));
+                }
+            }
+        }
+
+        if entries.len() <= max_entries {
+            return Ok(());
+        }
+        entries.sort_by_key(|(mtime, _)| *mtime);
+        let excess = entries.len() - max_entries;
+        for (_, path) in entries.into_iter().take(excess) {
+            let _ = std::fs::remove_file(&path);
+        }
+        Ok(())
     }
 
     // ===== 推送式回调注册 =====

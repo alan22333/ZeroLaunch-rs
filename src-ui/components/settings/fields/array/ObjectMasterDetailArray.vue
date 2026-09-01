@@ -2,8 +2,8 @@
   <div class="array-master-detail">
     <div class="md-list">
       <div
-        v-for="(_item, idx) in listValue"
-        :key="idx"
+        v-for="(item, idx) in listValue"
+        :key="rowKey(item, idx)"
         class="md-list-item"
         :class="{ active: selectedIndex === idx }"
         @click="selectedIndex = idx"
@@ -134,6 +134,19 @@ function summary(idx: number): string {
   const firstField = subFields.value[0]
   if (!firstField) return `#${idx + 1}`
   return String((item as Record<string, unknown>)[firstField.key] ?? `#${idx + 1}`)
+}
+
+/** v-for 稳定 key：优先取行内首个字段值（如 name/id），避免索引 key 在中间删除时
+ *  子字段组件（含内部输入态）串位；值可能重复/变更时退化为索引（与删除串位无关）。 */
+function rowKey(item: unknown, idx: number): string {
+  if (item && typeof item === 'object' && !Array.isArray(item)) {
+    const firstKey = subFields.value[0]?.key
+    if (firstKey !== undefined) {
+      const v = (item as Record<string, unknown>)[firstKey]
+      if (typeof v === 'string' || typeof v === 'number') return `${v}`
+    }
+  }
+  return `idx-${idx}`
 }
 
 /** 添加一个符合 item schema 默认值的条目。 */

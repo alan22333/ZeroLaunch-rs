@@ -19,7 +19,8 @@
     "noResults": "No results",
     "ready": "Ready",
     "candidates": "{count} candidates",
-    "translationStarted": "Translation started, please wait..."
+    "translationStarted": "Translation started, please wait...",
+    "paramLabel": "Parameter {n}"
   },
   "translator": {
     "title": "Translate",
@@ -45,7 +46,8 @@
     "modelLoadRetry": "Retry",
     "apply": "Apply",
     "modeLive": "Translate live",
-    "modeOnEnter": "Translate on Enter"
+    "modeOnEnter": "Translate on Enter",
+    "defaultTargetInvalid": "The saved default target language is not in the available options, please select again"
   },
   "footer": {
     "settings": "Settings",
@@ -163,6 +165,8 @@
       "installConfirmContent": "Install plugin: {name}",
       "installConfirmPositive": "Install",
       "installConfirmNegative": "Cancel",
+      "installRiskTitle": "Security Notice",
+      "installRiskContent": "Third-party plugins run with the same privileges as this app, and their UI executes inside the host window (styles are isolated only). Only install plugins from sources you trust.",
       "empty": "No plugins",
       "config": "Configure",
       "noConfig": "No configuration",
@@ -222,8 +226,17 @@
       "fieldMaxRestart": "Max Restarts",
       "rawManifest": "View raw manifest",
       "builtin": "Built-in",
-      "openHomepageFailed": "Failed to open homepage"
-    }
+      "openHomepageFailed": "Failed to open homepage",
+      "stateStarting": "Starting",
+      "stateStopped": "Stopped",
+      "stateCrashed": "Crashed",
+      "stateError": "Startup Error",
+      "stateUnknown": "Unknown",
+      "invalidHomepageUrl": "Invalid homepage URL: only http/https links are allowed"
+    },
+    "contentProcessor": "Content Processors",
+    "keywordInjector": "Keyword Injectors",
+    "biasRule": "Fixed Bias"
   },
   "contextMenu": {
     "execute": "Execute",

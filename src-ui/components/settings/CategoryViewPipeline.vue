@@ -4,48 +4,49 @@
 
     <!-- 详尽配置 -->
     <n-tabs type="line" default-value="datasource" display-directive="show" class="pipeline-tabs">
-      <n-tab-pane name="datasource" tab="数据源">
+      <n-tab-pane name="datasource" :tab="t('settings.dataSource')">
         <ListDetailPanel
           :items="getComponentsByType('DataSource')"
-          title="数据源"
+          :title="t('settings.dataSource')"
         />
       </n-tab-pane>
-      <n-tab-pane name="processor" tab="内容处理器">
+      <n-tab-pane name="processor" :tab="t('settings.contentProcessor')">
         <ListDetailPanel
           :items="getComponentsByType('KeywordOptimizer')"
-          title="内容处理器"
+          :title="t('settings.contentProcessor')"
         />
       </n-tab-pane>
-      <n-tab-pane name="injector" tab="关键字注入器">
+      <n-tab-pane name="injector" :tab="t('settings.keywordInjector')">
         <ListDetailPanel
           :items="getComponentsByType('KeywordInjector')"
-          title="关键字注入器"
+          :title="t('settings.keywordInjector')"
         />
       </n-tab-pane>
-      <n-tab-pane name="bias" tab="固定偏移量">
+      <n-tab-pane name="bias" :tab="t('settings.biasRule')">
         <ListDetailPanel
           :items="getComponentsByType('BiasRule')"
-          title="固定偏移量"
+          :title="t('settings.biasRule')"
         />
       </n-tab-pane>
-      <n-tab-pane name="searchengine" tab="检索引擎">
+      <n-tab-pane name="searchengine" :tab="t('settings.searchEngine')">
         <ListDetailPanel
           :items="getComponentsByType('SearchEngine')"
-          title="检索引擎"
+          :title="t('settings.searchEngine')"
           custom-toggle
+          :toggle-busy="searchToggleBusy"
           @toggle="onSearchEngineToggle"
         />
       </n-tab-pane>
-      <n-tab-pane name="scorebooster" tab="评分增强器">
+      <n-tab-pane name="scorebooster" :tab="t('settings.scoreBooster')">
         <ListDetailPanel
           :items="getComponentsByType('ScoreBooster')"
-          title="评分增强器"
+          :title="t('settings.scoreBooster')"
         />
       </n-tab-pane>
-      <n-tab-pane name="executor" tab="执行器">
+      <n-tab-pane name="executor" :tab="t('settings.actionExecutor')">
         <ListDetailPanel
           :items="getComponentsByType('ActionExecutor')"
-          title="执行器"
+          :title="t('settings.actionExecutor')"
         />
       </n-tab-pane>
     </n-tabs>
@@ -54,6 +55,7 @@
 
 <script setup lang="ts">
 import { NTabs, NTabPane } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import type { ComponentInfo } from '../../bridge/contract'
 import PipelineFlowDiagram from './PipelineFlowDiagram.vue'
 import ListDetailPanel from './ListDetailPanel.vue'
@@ -63,6 +65,8 @@ const props = defineProps<{
   components: ComponentInfo[]
 }>()
 
+const { t } = useI18n()
+
 function getComponentsByTypes(types: string[]): ComponentInfo[] {
   return props.components.filter(c => types.includes(c.componentType))
 }
@@ -71,9 +75,8 @@ function getComponentsByType(type: string): ComponentInfo[] {
   return getComponentsByTypes([type])
 }
 
-
-const { onToggle: onSearchEngineToggle } = useSearchEngineToggle(
-  () => getComponentsByType('SearchEngine')
+const { onToggle: onSearchEngineToggle, toggling: searchToggleBusy } = useSearchEngineToggle(
+  () => getComponentsByType('SearchEngine'),
 )
 </script>
 

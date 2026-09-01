@@ -30,6 +30,7 @@
             <n-switch
               :value="item.enabled"
               size="small"
+              :disabled="toggleBusy"
               @update:value="(val: boolean) => onItemToggle(item, val)"
             />
           </div>
@@ -75,9 +76,12 @@ const props = withDefaults(
     title: string
     /** 是否使用自定义切换逻辑（由父组件处理 toggle） */
     customToggle?: boolean
+    /** 自定义切换进行中：禁用开关防止重复触发（用于互斥切换等非原子流程） */
+    toggleBusy?: boolean
   }>(),
   {
     customToggle: false,
+    toggleBusy: false,
   },
 )
 

@@ -19,6 +19,10 @@ pub struct CachedCandidateData {
     cached_display_names: HashSet<String>,
     /// 下一个候选项ID
     next_candidate_id: CandidateId,
+    /// 缓存世代：每次全量重建递增。前端确认时回传该世代，
+    /// 后端校验不匹配即拒绝——防止缓存刷新后 id 漂移导致确认到错误候选。
+    /// 不随跨 RPC 快照传输（快照仅用于流水线组件打分，不含确认语义）。
+    generation: u64,
 }
 
 /// CachedCandidateData 的跨 RPC 序列化快照（宿主缓存 → 插件进程）。
@@ -51,8 +55,20 @@ impl CachedCandidateData {
             cached_targets: HashSet::new(),
             cached_display_names: HashSet::new(),
             next_candidate_id: 1,
+            generation: 0,
         }
     }
+
+    /// 当前缓存世代（前端确认回传比对用）。
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// 全量重建完成后递增世代：旧确认载荷（携带旧世代）被 route_confirm 拒绝。
+    pub fn bump_generation(&mut self) {
+        self.generation += 1;
+    }
+
     /// 导出跨 RPC 序列化快照（与 from_data 一一对应）。
     /// 用于搜索流水线组件（引擎/增强器）经 RPC 接收宿主候选缓存。
     pub fn to_data(&self) -> CandidateCacheSnapshot {
@@ -102,6 +118,7 @@ impl CachedCandidateData {
             cached_targets,
             cached_display_names,
             next_candidate_id: data.next_candidate_id,
+            generation: 0,
         }
     }
 

@@ -2,7 +2,8 @@
 # ============================================================================
 # summarize-changes commit message 行长度校验脚本
 # 从 stdin 读取 commit message，逐行检测长度：
-#   - 首行（header）≤ HEADER_MAX（默认 72，conventional commit 标准）
+#   - 首行（header）≤ HEADER_MAX（默认 100，与 .commitlintrc.json
+#     header-max-length 一致，覆盖 conventional 默认 72）
 #   - 其余行（body）≤ BODY_MAX（默认 100，commitlint body-max-line-length）
 # 全部通过 → 退出码 0；存在超限行 → 打印违规明细与行号，退出码 1。
 #
@@ -16,7 +17,7 @@
 # ============================================================================
 set -euo pipefail
 
-HEADER_MAX="${1:-72}"
+HEADER_MAX="${1:-100}"
 BODY_MAX="${2:-100}"
 
 # perl 逐行读取 stdin，输出超限行的行号与字符数；无超限则无输出。

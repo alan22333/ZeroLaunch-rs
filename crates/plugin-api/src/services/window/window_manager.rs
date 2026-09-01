@@ -14,4 +14,9 @@ pub trait WindowManager: Send + Sync {
     /// 参数：title - 窗口标题的部分匹配文本（不区分大小写）。
     /// 返回：成功激活返回 Ok(true)，未找到窗口返回 Ok(false)，失败返回 HostApiError。
     async fn activate_window_by_title(&self, title: &str) -> Result<bool, HostApiError>;
+
+    /// 根据进程 PID 激活已存在的窗口。
+    /// 参数：pid - 进程标识符。
+    /// 返回：成功激活返回 Ok(true)，未找到窗口返回 Ok(false)，失败返回 HostApiError。
+    async fn activate_window_by_pid(&self, pid: u32) -> Result<bool, HostApiError>;
 }
