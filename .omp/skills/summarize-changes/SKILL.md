@@ -68,8 +68,9 @@ description: 总结当前代码更改，生成结构化的 commit message 或变
    ```
 
    - **场景 1：header 与 Why 直接来自步骤 0.5 的对话目标**，What & Impact 结合对话决策与 diff 验证结果；场景 2 按原规则从 diff 推断。
-   - **header ≤72 字符**（conventional commit 标准），且不含标点结尾。
+   - **header ≤100 字符**（commitlint `header-max-length`），且不含标点结尾。
    - **body 每行 ≤100 字符**（commitlint `body-max-line-length`）。
+   - **subject 首词避用大写拉丁字母**：commitlint `subject-case` 禁止 sentence-case / start-case / pascal-case / upper-case，以全大写缩写（`SDK`、`API`、`IPC`、`CLI`）或首字母大写的英文单词开头都会违规；中文或小写开头（如 `sdk crates 版本解耦`）则通过。规避方法：缩写改小写（`sdk`），或改用中文/其他措辞开头。
    - 使用中文 body，**不含**双引号 `"`。
    - **每节要点 ≤4 个**，用抽象概括代替逐项枚举（不列函数名、文件数、测试数）。
    - **禁止在 body 中嵌入超过 50 字符的代码/路径/符号引用**。必须用自然语言描述行为，而非复现代码符号：
@@ -79,14 +80,14 @@ description: 总结当前代码更改，生成结构化的 commit message 或变
      - ✅ 只描述「在哪层做了什么」即可，不列具体行号
    - **Scope 规则**：基于对 diff 的理解，用能代表本次改动所属领域的短名称作 scope（如 `translator`、`config`、`i18n`）。目录结构仅作参考，不作机械判定：
      - 改动可归入单一领域（功能、子系统、配置域或横切工作如 i18n/性能）→ 用领域名，即使文件散落在多个目录（如后端、前端与语言资源共同完成同一功能）。
-     - 无法归入单一领域（均匀分布在 3+ 互不相关目录的杂项改动）→ 省略 scope。
-     - 禁止组合型 scope（如 `config-i18n`）。
 
-6.5. **行长度校验**：将生成的 commit message 通过管道送入 `.omp/skills/summarize-changes/lint-commit.sh` 检测：
-   - 命令：`printf '<commit message>' | bash .omp/skills/summarize-changes/lint-commit.sh`（或 heredoc 方式传入）。
-   - 脚本自动检测：首行（header）≤72 字符、其余行（body）≤100 字符，超限时打印违规行号、字符数与内容并退出码 1。
-   - 退出码 0 → 合规，进入步骤 7；退出码 1 → 按报错行压缩措辞，**重新生成** commit message 后再次校验，直至通过。
-   - 脚本按 Unicode 字符计数（perl 实现），中文按字符而非字节，跨平台（Git Bash / MSYS2 / WSL / macOS / Linux）行为一致。
+6.4. **scope 大小写**：scope 须为小写/中划线/驼峰/帕斯卡命名，避免大写缩写开头（如 `SDK` 会触发 `scope-case` 违规），示例 `workspace`、`api`、`i18n` 均合规。
+
+6.5. **commitlint 校验**：将生成的 commit message 送入仓库的 commitlint 检测——与 `.husky/commit-msg` 钩子同一规则源，覆盖 `subject-case`、`type-case`、`scope-case`、`header-max-length`、`body-max-line-length` 等全部规则（不再依赖自写脚本）：
+   - 命令（在仓库根目录执行）：`printf '%s\n' '<commit message>' | bun x --no -- commitlint`，多行消息可用 heredoc 传入，空行须保留。
+   - 退出码 0 → 合规，进入步骤 7；退出码 1 → 按报错规则修正（超长压缩措辞、subject/type/scope 大小写调整），**重新生成** commit message 后再次校验，直至通过。
+   - commitlint 按字符统计长度（对宽字符与英文一致计数），header 与 body 上限均为 100。
+   - 若本地无 bun 或 commitlint 不可用，回退为行长度检查（header ≤100、body ≤100）。
 
 7. **输出结果**：展示给用户，不执行 `git commit`。
 
