@@ -1,9 +1,10 @@
 [package]
 name = "zerolaunch-platform-windows"
-version.workspace = true
+version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 description = "Windows platform implementations of zerolaunch-plugin-api traits."
+repository.workspace = true
 
 [features]
 default = []

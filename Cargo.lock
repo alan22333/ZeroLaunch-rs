@@ -8742,7 +8742,7 @@ dependencies = [
 
 [[package]]
 name = "zerolaunch-platform-windows"
-version = "1.2.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -8782,7 +8782,7 @@ dependencies = [
 
 [[package]]
 name = "zerolaunch-plugin-api"
-version = "1.2.0"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -8815,7 +8815,7 @@ dependencies = [
 
 [[package]]
 name = "zerolaunch-plugin-host"
-version = "1.2.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8838,7 +8838,7 @@ dependencies = [
 
 [[package]]
 name = "zerolaunch-plugin-protocol"
-version = "1.2.0"
+version = "0.1.0"
 dependencies = [
  "semver",
  "serde",
@@ -8852,7 +8852,7 @@ dependencies = [
 
 [[package]]
 name = "zerolaunch-plugin-sdk-rust"
-version = "1.2.0"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
