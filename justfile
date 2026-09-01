@@ -6,6 +6,12 @@ set shell := ["cmd.exe", "/C"]
 style:
     cargo clippy --workspace --all-targets --all-features --fix --allow-dirty --allow-staged
     cargo fmt --all
+    just package-check
+
+# 打包内容检查（发布前校验 crates.io 产物）
+# 仅校验 api：其余 4 个 crate 依赖 api，api 发布后可改为循环全量校验
+package-check:
+    cargo package -p zerolaunch-plugin-api --allow-dirty --no-verify
 
 # 快速编译检查（全 workspace）
 check:
