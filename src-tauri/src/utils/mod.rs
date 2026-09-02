@@ -3,6 +3,7 @@ pub mod font_database;
 pub mod locale;
 pub mod trace_id;
 pub mod waiting_hashmap;
+#[cfg(target_os = "windows")]
 pub mod windows;
 use chrono::{Local, NaiveDate};
 use time::OffsetDateTime;

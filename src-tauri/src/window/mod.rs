@@ -21,10 +21,12 @@ pub(crate) async fn prepare_window_position(
     host_api: &Arc<HostApi>,
     app_handle: &tauri::AppHandle,
 ) -> bool {
+    #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
     let wake_on_fullscreen = config_manager
         .get_component_setting("window-behavior-config", "is_wake_on_fullscreen")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    #[cfg(target_os = "windows")]
     if !wake_on_fullscreen && crate::utils::windows::is_foreground_fullscreen() {
         return false;
     }

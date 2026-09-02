@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/platform-macos",
     "crates/platform-windows",
     "crates/plugin-api",
     "crates/plugin-protocol",
@@ -111,6 +112,7 @@ zerolaunch-plugin-host = { path = "crates/plugin-host", version = "0.1" }
 zerolaunch-plugin-protocol = { path = "crates/plugin-protocol", version = "0.1" }
 zerolaunch-plugin-sdk-rust = { path = "crates/plugin-sdk-rust", version = "0.1" }
 zerolaunch-platform-windows = { path = "crates/platform-windows", version = "0.1" }
+zerolaunch-platform-macos = { path = "crates/platform-macos", version = "0.1" }
 
 [profile.release]
 codegen-units = 16

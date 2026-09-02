@@ -8741,6 +8741,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "zerolaunch-platform-macos"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "async-trait",
+ "dashmap",
+ "dirs",
+ "image",
+ "notify",
+ "parking_lot",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin-global-shortcut",
+ "tokio",
+ "tracing",
+ "url",
+ "zerolaunch-plugin-api",
+]
+
+[[package]]
 name = "zerolaunch-platform-windows"
 version = "0.1.0"
 dependencies = [
@@ -8942,6 +8964,7 @@ dependencies = [
  "windows 0.62.2",
  "windows-core 0.62.2",
  "winreg 0.56.0",
+ "zerolaunch-platform-macos",
  "zerolaunch-platform-windows",
  "zerolaunch-plugin-api",
  "zerolaunch-plugin-host",
