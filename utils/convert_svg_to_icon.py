@@ -1,4 +1,6 @@
 import os
+import io
+import struct
 import cairosvg
 from PIL import Image
 import subprocess
@@ -11,12 +13,26 @@ def ensure_directory(directory):
         os.makedirs(directory)
 
 def svg_to_png(svg_path, output_path, width, height):
-    """将 SVG 转换为指定尺寸的 PNG"""
-    cairosvg.svg2png(url=svg_path, write_to=output_path, output_width=width, output_height=height)
+    """将 SVG 转换为指定尺寸的 PNG（超采样渲染 + 透明边自动裁剪后精确缩放到目标尺寸）"""
+    # 以 4 倍目标尺寸渲染 SVG，保证小尺寸下圆环边缘的抗锯齿质量
+    png_data = cairosvg.svg2png(
+        url=svg_path,
+        output_width=width * 4,
+        output_height=height * 4,
+    )
+    img = Image.open(io.BytesIO(png_data)).convert("RGBA")
+
+    # 裁剪四周透明区域，让图标内容占满画布（消除 SVG 视口留白导致的图标视觉缩小）
+    alpha_bbox = img.split()[3].getbbox()
+    if alpha_bbox:
+        img = img.crop(alpha_bbox)
+
+    # 缩放到目标尺寸
+    img = img.resize((width, height), Image.LANCZOS)
 
     # 使用 PIL 设置 DPI 为 72
-    img = Image.open(output_path)
     img.save(output_path, dpi=(72, 72))
+    img.close()
     print(f"已创建: {output_path} (72 DPI)")
 
 def create_retina_image(png_path, output_path, scale=2):
@@ -29,7 +45,10 @@ def create_retina_image(png_path, output_path, scale=2):
 
 def create_ico(png_path, output_path):
     """创建 .ico 文件（内嵌 16~256 多尺寸，256 由 PIL 以 PNG 压缩写入）"""
-    sizes = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+    # Pillow 写入 ICO 时按尺寸升序排列帧，但 Tauri 编译期只取 ICO 第一帧
+    # （tauri-codegen 的 CachedIcon::new_ico 读 entries()[0]）作为窗口/任务栏图标，
+    # 首帧若为 16px，任务栏放大后图标会模糊。因此保存后重排目录，使 256px 帧居首。
+    sizes = [(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (24, 24), (16, 16)]
 
     img = Image.open(png_path)
     try:
@@ -40,7 +59,42 @@ def create_ico(png_path, output_path):
     finally:
         img.close()
 
+    reorder_ico_largest_first(output_path)
+
     print(f"已创建: {output_path}")
+
+def reorder_ico_largest_first(ico_path):
+    """重排 ICO 目录项，使最大尺寸帧排在首位（Pillow 写入时为升序）。"""
+    with open(ico_path, 'rb') as f:
+        data = f.read()
+    count = struct.unpack('<H', data[4:6])[0]
+
+    entries = []
+    for i in range(count):
+        offset = 6 + 16 * i
+        width = data[offset] or 256
+        height = data[offset + 1] or 256
+        size = struct.unpack('<I', data[offset + 8:offset + 12])[0]
+        data_offset = struct.unpack('<I', data[offset + 12:offset + 16])[0]
+        entries.append((width, height, data[offset:offset + 16], data[data_offset:data_offset + size]))
+
+    entries.sort(key=lambda e: -e[0])  # 按宽度降序，最大帧居首
+
+    header = data[:6]
+    directory = b''.join(e[2] for e in entries)
+    payload = b''.join(e[3] for e in entries)
+
+    out = bytearray(header + directory)
+    cursor = 6 + 16 * count
+    for i, (_, _, _, blob) in enumerate(entries):
+        offset = 6 + 16 * i
+        out[offset + 8:offset + 12] = struct.pack('<I', len(blob))
+        out[offset + 12:offset + 16] = struct.pack('<I', cursor)
+        cursor += len(blob)
+    out += payload
+
+    with open(ico_path, 'wb') as f:
+        f.write(out)
 
 def create_icns(svg_path, output_path):
     """创建 .icns 文件 (仅在 macOS 上使用 iconutil)"""
@@ -122,8 +176,6 @@ def main():
     create_icns(svg_file, icns_path)
 
     print("所有图标已成功创建，分辨率均为 72 DPI！")
-
-
 
 if __name__ == "__main__":
     main()

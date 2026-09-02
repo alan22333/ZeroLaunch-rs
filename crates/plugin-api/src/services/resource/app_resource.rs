@@ -24,7 +24,8 @@ impl AppResourceService {
         let icons_dir_path = PathBuf::from(&icons_dir);
 
         let icons = [
-            ("tray_icon", "32x32.png"),
+            // 托盘图标使用高清源，供 Windows 缩放到 32x32 呈现
+            ("tray_icon", "128x128@2x.png"),
             ("web_pages", "web_pages.png"),
             ("tips", "tips.png"),
             ("terminal", "terminal.png"),
