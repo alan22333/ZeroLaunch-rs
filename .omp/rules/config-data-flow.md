@@ -1,15 +1,15 @@
 ---
 description: 配置数据流分层规范 — 运行时类型、存储类型、转换函数的三层职责分离
 condition: "get_settings"
-scope: "tool:read(src-tauri/src/builtin_plugin/config/**), tool:edit(src-tauri/src/builtin_plugin/config/**), tool:write(src-tauri/src/builtin_plugin/config/**), tool:read(src-tauri/src/core/bias_rule.rs), tool:edit(src-tauri/src/core/bias_rule.rs), tool:write(src-tauri/src/core/bias_rule.rs), tool:read(src-tauri/src/bootstrap.rs), tool:edit(src-tauri/src/bootstrap.rs), tool:write(src-tauri/src/bootstrap.rs), tool:read(src-tauri/src/plugin_framework/session_dispatcher.rs), tool:edit(src-tauri/src/plugin_framework/session_dispatcher.rs), tool:write(src-tauri/src/plugin_framework/session_dispatcher.rs), tool:read(src-tauri/src/plugin_framework/candidate_pipeline.rs), tool:edit(src-tauri/src/plugin_framework/candidate_pipeline.rs), tool:write(src-tauri/src/plugin_framework/candidate_pipeline.rs), tool:read(src-tauri/src/plugin_framework/executor_registry.rs), tool:edit(src-tauri/src/plugin_framework/executor_registry.rs), tool:write(src-tauri/src/plugin_framework/executor_registry.rs), tool:read(crates/plugin-api/src/services/**), tool:edit(crates/plugin-api/src/services/**), tool:write(crates/plugin-api/src/services/**), tool:read(src-ui/bridge/contract.ts), tool:edit(src-ui/bridge/contract.ts), tool:write(src-ui/bridge/contract.ts)"
+scope: "tool:read(src-tauri/src/builtin_plugin/config/**), tool:edit(src-tauri/src/builtin_plugin/config/**), tool:write(src-tauri/src/builtin_plugin/config/**), tool:read(src-tauri/src/core/config/**), tool:edit(src-tauri/src/core/config/**), tool:write(src-tauri/src/core/config/**), tool:read(src-tauri/src/core/bias_rule.rs), tool:edit(src-tauri/src/core/bias_rule.rs), tool:write(src-tauri/src/core/bias_rule.rs), tool:read(src-tauri/src/bootstrap.rs), tool:edit(src-tauri/src/bootstrap.rs), tool:write(src-tauri/src/bootstrap.rs), tool:read(src-tauri/src/plugin_framework/session_dispatcher.rs), tool:edit(src-tauri/src/plugin_framework/session_dispatcher.rs), tool:write(src-tauri/src/plugin_framework/session_dispatcher.rs), tool:read(src-tauri/src/plugin_framework/candidate_pipeline.rs), tool:edit(src-tauri/src/plugin_framework/candidate_pipeline.rs), tool:write(src-tauri/src/plugin_framework/candidate_pipeline.rs), tool:read(src-tauri/src/plugin_framework/executor_registry.rs), tool:edit(src-tauri/src/plugin_framework/executor_registry.rs), tool:write(src-tauri/src/plugin_framework/executor_registry.rs), tool:read(crates/plugin-api/src/services/**), tool:edit(crates/plugin-api/src/services/**), tool:write(crates/plugin-api/src/services/**), tool:read(src-ui/bridge/contract.ts), tool:edit(src-ui/bridge/contract.ts), tool:write(src-ui/bridge/contract.ts)"
 ---
 
 # 配置数据流分层规范
 | 层 | 位置 | 包含 | 禁止 |
 |---|---|---|---|
 | **运行时类型** | `core/` 或 `crates/plugin-api/` | 消费方需要的纯数据 struct，`#[derive(Debug, Clone)]` | `#[derive(Serialize, Deserialize)]`、持久化逻辑 |
-| **存储类型**（Settings） | `builtin_plugin/config/<component>.rs` | serde struct，`#[derive(Serialize, Deserialize)]`，每字段 `#[serde(rename, default)]` | 引用 `ConfigManager`、包含业务方法 |
-| **转换函数** | `builtin_plugin/config/<component>.rs` | `pub(crate) fn settings_to_xxx(settings: &Settings) -> RuntimeType` | 依赖 `ConfigManager` |
+| **存储类型**（Settings） | `core/config/<component>_settings.rs` 或 `builtin_plugin/config/<component>.rs` | serde struct，`#[derive(Serialize, Deserialize)]`，每字段 `#[serde(rename, default)]` | 引用 `ConfigManager`、包含业务方法 |
+| **转换函数** | `core/config/<component>_settings.rs` 或 `builtin_plugin/config/<component>.rs` | `pub(crate) fn settings_to_xxx(settings: &Settings) -> RuntimeType` | 依赖 `ConfigManager` |
 
 ## 配置默认值来源
 
@@ -39,7 +39,13 @@ scope: "tool:read(src-tauri/src/builtin_plugin/config/**), tool:edit(src-tauri/s
 // bias 示例
 let rules: Vec<BiasRule> = config_manager
     .get_settings("bias-config")
-    .and_then(|v| serde_json::from_value::<BiasSettings>(v).ok())
+    .and_then(|v| match serde_json::from_value::<BiasSettings>(v) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            tracing::warn!(error = %e, "反序列化 bias-config 失败，回退默认");
+            None
+        }
+    })
     .map(|s| bias_settings_to_rules(&s))
     .unwrap_or_default();
 
@@ -54,9 +60,9 @@ let hotkey_config = config_manager
 
 | 组件 | 运行时类型位置 | 存储类型位置 | 转换函数位置 |
 |---|---|---|---|
-| 快捷键（hotkey） | `plugin-api/services/hotkey/types.rs` (HotkeyConfig) | `hotkey_config.rs` (HotkeySettings) | `hotkey_config.rs` |
-| 固定偏移（bias） | `core/bias_rule.rs` (BiasRule) | `bias_config.rs` (BiasSettings) | `bias_config.rs` |
+| 快捷键（hotkey） | `plugin-api/services/hotkey/types.rs` (HotkeyConfig) | `builtin_plugin/config/hotkey_config.rs` (HotkeySettings) | `builtin_plugin/config/hotkey_config.rs` |
+| 固定偏移（bias） | `core/bias_rule.rs` (BiasRule) | `core/config/bias_settings.rs` (BiasSettings) | `core/config/bias_settings.rs` |
 
 新增类似组件时**必须**按此表创建对应的三件套。
 
-> 注意：上表仅为示例（hotkey、bias），其他配置组件（appearance、storage、icon_override、general、window_behavior、candidate_registry 等）同样遵循三层分离原则：运行时类型在 `core/` 或 `crates/plugin-api/src/services/<domain>/types.rs`，存储类型和转换函数在 `builtin_plugin/config/<component>.rs`。
+> 注意：上表仅为示例（hotkey、bias），其他配置组件（appearance、storage、icon_override、general、window_behavior、candidate_registry 等）同样遵循三层分离原则：运行时类型在 `core/` 或 `crates/plugin-api/src/services/<domain>/types.rs`；存储类型和转换函数在 `core/config/`（纯配置数据，如 bias_settings.rs）或 `builtin_plugin/config/<component>.rs`（与 Configurable 组件同置）。

@@ -1,6 +1,6 @@
 ---
 description: 第三方插件运行时规范：子进程 JSON-RPC 架构、协议、Manifest 校验、生命周期、RemoteComponent、CLI HTTP、zlplugin:// 协议
-condition: "plugin/initialize|plugin/get_metadata|plugin/get_components|plugin/shutdown|RemoteComponent|remote_component|zlplugin|Content-Length|JSON-RPC|PluginHostManager|host_handler|plugin_installer|plugin_install_local|manifest"
+condition: "plugin/initialize|plugin/get_metadata|plugin/get_components|RemoteComponent|remote_component|zlplugin|Content-Length|JSON-RPC|PluginHostManager|host_handler|plugin_installer|plugin_install_local|manifest"
 scope: "tool:read(crates/plugin-protocol/**), tool:edit(crates/plugin-protocol/**), tool:write(crates/plugin-protocol/**), tool:read(crates/plugin-host/**), tool:edit(crates/plugin-host/**), tool:write(crates/plugin-host/**), tool:read(crates/plugin-sdk-rust/**), tool:edit(crates/plugin-sdk-rust/**), tool:write(crates/plugin-sdk-rust/**), tool:read(src-tauri/src/plugin_framework/**), tool:edit(src-tauri/src/plugin_framework/**), tool:write(src-tauri/src/plugin_framework/**), tool:read(src-tauri/src/cli_server/**), tool:edit(src-tauri/src/cli_server/**), tool:write(src-tauri/src/cli_server/**), tool:read(src-tauri/src/commands/plugin.rs), tool:edit(src-tauri/src/commands/plugin.rs), tool:write(src-tauri/src/commands/plugin.rs), tool:read(crates/plugin-api/src/plugin/**), tool:edit(crates/plugin-api/src/plugin/**), tool:write(crates/plugin-api/src/plugin/**), tool:read(crates/plugin-api/src/host/**), tool:edit(crates/plugin-api/src/host/**), tool:write(crates/plugin-api/src/host/**)"
 ---
 
@@ -12,7 +12,7 @@ scope: "tool:read(crates/plugin-protocol/**), tool:edit(crates/plugin-protocol/*
 
 **宿主侧入口**集中在 `src-tauri/src/plugin_framework/`：
 - `manager.rs` — 第三方插件生命周期管理（加载、卸载、发现、崩溃恢复），唯一入口
-- `host_handler.rs` — 子进程 Host 管理（spawn、健康监控、优雅关闭）
+- `host_handler.rs` — 反向 RPC 路由：将插件的 `host/*` RPC 调用分发到本地 `PluginHandle` 方法（子进程 spawn/健康监控/关闭归 `crates/plugin-host`）
 - `plugin_installer.rs` — 插件安装/卸载逻辑（从 manager.rs 提取）
 - `plugin_info.rs` — 插件信息类型
 - `zlplugin_protocol.rs` — `zlplugin://` 自定义协议处理（原 `plugin_protocol_assets/` 已合并至此）
@@ -37,9 +37,9 @@ scope: "tool:read(crates/plugin-protocol/**), tool:edit(crates/plugin-protocol/*
 
 - **spawn**：启动子进程 → `plugin/initialize` 握手 → `plugin/get_metadata` → `plugin/get_components`
 - **健康监控**：watchdog task 检测退出，`auto_restart=true` 时自动重启，上限 `max_restart`
-  - **重启前同样做组件 id 冲突预检**，且预检必须**豁免插件自身组件 id**（崩溃时 CM 中旧组件尚未解注册，自身僵尸注册 ≠ 他人占用，否则必然自碰撞误判）
-  - 放弃重启（max_restart 超限 / 冲突 / spawn / discover 失败）时必须调用 `on_restart_abandoned` 解注册 CM/SR 旧组件，并 shutdown 已 spawn 的进程
-- **优雅关闭**：`plugin/shutdown` → 等 5s → SIGKILL
+  - **崩溃即解注册**：`on_crash` 回调第一步解注册插件组件（CM/SR），因此重启预检时插件自身组件已不在数据源中，无需豁免集即可避免自碰撞
+  - 放弃重启（max_restart 超限 / 冲突 / spawn / discover 失败）时直接清理已 spawn 的进程，组件已随崩溃解注册、无需额外清理
+- **优雅关闭**：关闭 stdin 发 EOF 驱动 SDK 进程退出 → 等 watchdog 完成 → 超时强杀（taskkill）兜底。协议层无 `plugin/shutdown` RPC
 - **stderr 日志**：收集到 `plugin-logs/<plugin-id>.log`
 
 ## RemoteComponent

@@ -1,12 +1,12 @@
 ---
-description: Plugin Trait Init — init 接收 PluginContext 和 Arc<PluginHandle>，禁止在插件内部状态存储 PluginHandle
+description: Plugin Trait Init — async init 接收 PluginContext 和 Option<Arc<PluginHandle>>，禁止在插件内部状态存储 PluginHandle
 condition: "impl Plugin for|fn init\\("
-scope: "tool:edit(src-tauri/src/builtin_plugin/**), tool:write(src-tauri/src/builtin_plugin/**), tool:edit(crates/plugin-api/src/plugin/**), tool:write(crates/plugin-api/src/plugin/**), tool:edit(crates/plugin-api/src/host/**), tool:write(crates/plugin-api/src/host/**), tool:edit(plugin-template/**), tool:write(plugin-template/**)"
+scope: "tool:edit(src-tauri/src/builtin_plugin/**), tool:write(src-tauri/src/builtin_plugin/**), tool:edit(crates/plugin-api/src/plugin/**), tool:write(crates/plugin-api/src/plugin/**), tool:edit(crates/plugin-api/src/host/**), tool:write(crates/plugin-api/src/host/**)"
 ---
 
 # Plugin Trait Init
 
-- `Plugin::init()` 接收 `&PluginContext`（请求级上下文）和 `Arc<PluginHandle>`（插件服务句柄）
+- `Plugin::init()` 是 async 方法：`async fn init(&self, ctx: &PluginContext, handle: Option<Arc<PluginHandle>>)`（请求级上下文 + 可选插件服务句柄）
 - `PluginHandle` 从 `HostApi::register(plugin_id, config)` 获取，绑定插件身份与配置
 - 用 `handle` 参数执行平台操作。用 `ctx` 参数获取 trace_id、query_id 等请求级信息
 - **禁止** 在实现 `Plugin` trait 的第三方插件内部状态中存储 `PluginHandle`；平台能力仅经 `init` 参数传入的 `Arc<PluginHandle>` 访问（`PluginContext` 仅携带 trace_id/query_id 等请求级信息，**无** 句柄访问渠道）
