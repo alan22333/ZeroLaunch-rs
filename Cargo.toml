@@ -15,7 +15,7 @@ exclude = ["xtask", "plugin-template"]
 version = "1.3.0"
 edition = "2021"
 authors = ["ghost-him"]
- license = "GPL-3.0-only"
+license = "GPL-3.0-only"
 repository = "https://github.com/ghost-him/ZeroLaunch-rs"
 
 [workspace.dependencies]
@@ -45,15 +45,20 @@ resvg = "0.47.0"
 usvg = "0.47.0"
 tiny-skia = "0.12.0"
 encoding_rs = "0.8.35"
-async-openai = { version = "0.41", default-features = false, features = ["chat-completion", "embedding", "model", "rustls"] }
+async-openai = { version = "0.41", default-features = false, features = [
+    "chat-completion",
+    "embedding",
+    "model",
+    "rustls",
+] }
 futures-util = "0.3"
 ollama-rs = { version = "0.3", features = ["stream"] }
- reqwest = { version = "0.13.4", features = ["json"] }
- reqwest_dav = "0.3.3"
+reqwest = { version = "0.13.4", features = ["json"] }
+reqwest_dav = "0.3.3"
 blake3 = "1.8.5"
 fnv = "1.0.7"
- lru = "0.18.0"
- sha2 = "0.10"
+lru = "0.18.0"
+sha2 = "0.10"
 uuid = { version = "1.23.4", features = ["v4"] }
 bincode-next = "3.1.1"
 kmeans_colors = "0.7.1"
@@ -106,11 +111,11 @@ notify = "8.2.0"
 inventory = "0.3"
 dirs = "6"
 
-zerolaunch-plugin-api = { path = "crates/plugin-api", version = "0.1" }
-zerolaunch-plugin-host = { path = "crates/plugin-host", version = "0.1" }
-zerolaunch-plugin-protocol = { path = "crates/plugin-protocol", version = "0.1" }
-zerolaunch-plugin-sdk-rust = { path = "crates/plugin-sdk-rust", version = "0.1" }
-zerolaunch-platform-windows = { path = "crates/platform-windows", version = "0.1" }
+zerolaunch-plugin-api = { path = "crates/plugin-api", version = "0.1.0" }
+zerolaunch-plugin-host = { path = "crates/plugin-host", version = "0.1.1" }
+zerolaunch-plugin-protocol = { path = "crates/plugin-protocol", version = "0.1.0" }
+zerolaunch-plugin-sdk-rust = { path = "crates/plugin-sdk-rust", version = "0.1.0" }
+zerolaunch-platform-windows = { path = "crates/platform-windows", version = "0.1.0" }
 
 [profile.release]
 codegen-units = 16
