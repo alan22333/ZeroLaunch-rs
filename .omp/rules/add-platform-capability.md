@@ -13,11 +13,15 @@ scope: "tool:edit(crates/plugin-api/src/**), tool:write(crates/plugin-api/src/**
 4. 通过 `HostApi` 方法暴露（如果是请求-响应模式，再通过 `PluginHandle` 暴露）
 
 **错误做法：**
-- 把平台特定代码放在 `core/` 或 `plugin/` 中
-- 从插件代码直接调用平台 API
+- 把平台特定代码放在 `core/`、`builtin_plugin/` 或 `plugin_framework/` 中（平台实现必须集中在 `platform-windows/`）
+- 从内置插件代码绕过 `PluginHandle` 直接调用平台 API（第三方插件在子进程，天然不可达，经 SDK `host/*` RPC）
 
 ## 新增方法决策
 
 - 特权方法（仅核心调用）→ 只在 `HostApi` 上实现
 - 通用方法（插件也需要）→ 只在 `PluginHandle` 上实现
 - 如需新 trait 依赖，则在 `HostApi` 上添加 `Arc<dyn NewTrait>` 字段，再在 `register()` 中 clone 给 `PluginHandle`
+
+## Mock 同步
+
+- 新增能力域/`PluginHandle` 方法后，**必须** 同步 `crates/plugin-api/src/mock/stubs.rs` 与 `mock/helpers.rs`：`mock_plugin_handle()` 构造的桩需注入对应 `Stub*Service`，否则 mock 编译失败

@@ -26,7 +26,7 @@ scope:
 ## 正确写法
 
 ```rust
-use crate::plugin_framework::QueryChannel;
+use zerolaunch_plugin_api::plugin::QueryChannel;
 use zerolaunch_plugin_api::config::SettingDefinition;
 
 let response = session_router
@@ -40,7 +40,7 @@ fn setting_schema(&self) -> Vec<SettingDefinition> { … }
 
 ```rust
 let response = session_router
-    .route_query(&trace_id, &query, crate::plugin_framework::QueryChannel::Ui)
+    .route_query(&trace_id, &query, zerolaunch_plugin_api::plugin::QueryChannel::Ui)
     .await;
 
 fn setting_schema(&self) -> Vec<zerolaunch_plugin_api::config::SettingDefinition> { … }
@@ -51,3 +51,4 @@ fn setting_schema(&self) -> Vec<zerolaunch_plugin_api::config::SettingDefinition
 - `use` / `pub use` 语句本身（含 `pub(crate) use` 等 re-export）不受此约束——它们正是导入的载体
 - 同名类型消歧时在文件头使用 `use ... as ...` 别名，不在调用点写完整路径
 - `super::` 前缀同理：跨模块引用一律文件头导入，不在调用点展开
+- 约束针对**跨模块**调用点：同文件/同模块内引用自身类型（写 `crate::Foo` 与短名等价）不在禁止范围——该场景不存在 use 导入对象
