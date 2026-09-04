@@ -9,13 +9,15 @@ use tauri::Manager;
 use tracing::warn;
 
 use crate::core::config::ConfigManager;
+use crate::platform::is_foreground_fullscreen;
 use crate::sdk::HostApi;
 use zerolaunch_plugin_api::services::window::{MonitorInfo, PositionRequest, WindowPosition};
 
 /// 准备搜索栏窗口位置：全屏检查 → 读取定位配置 → 计算并设置窗口坐标。
 ///
-/// 全屏检查为平台相关：Windows 与 macOS 均检测前台窗口覆盖主屏（默认
-/// `is_wake_on_fullscreen=false` 时全屏不唤醒搜索栏），其余平台跳过该门控。
+/// 全屏检查经平台注入的 `is_foreground_fullscreen()` 统一完成：Windows 与
+/// macOS 检测前台窗口覆盖主屏（默认 `is_wake_on_fullscreen=false` 时全屏
+/// 不唤醒搜索栏）。新增平台需实现该函数。
 ///
 /// 返回 `true` 表示定位成功可继续唤醒；
 /// 返回 `false` 表示被阻拦（全屏应用且未开启全屏唤醒）。
@@ -24,17 +26,12 @@ pub(crate) async fn prepare_window_position(
     host_api: &Arc<HostApi>,
     app_handle: &tauri::AppHandle,
 ) -> bool {
-    #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
     let wake_on_fullscreen = config_manager
         .get_component_setting("window-behavior-config", "is_wake_on_fullscreen")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    #[cfg(target_os = "windows")]
-    if !wake_on_fullscreen && crate::utils::windows::is_foreground_fullscreen() {
-        return false;
-    }
-    #[cfg(target_os = "macos")]
-    if !wake_on_fullscreen && crate::platform::is_foreground_fullscreen() {
+    // 全屏门控：Windows 与 macOS 检测前台窗口覆盖主屏，其余平台该函数为 false
+    if !wake_on_fullscreen && is_foreground_fullscreen() {
         return false;
     }
 

@@ -17,6 +17,7 @@ mod path_resolver;
 mod resource_loader;
 mod shell;
 mod theme;
+mod utils;
 mod window;
 mod window_positioner;
 
@@ -38,5 +39,6 @@ pub use path_resolver::MacosPathResolver;
 pub use resource_loader::MacosResourceLoader;
 pub use shell::MacosShellExecutor;
 pub use theme::{start_system_theme_monitor, MacosThemeProvider};
+pub use utils::{init_com, os_version};
 pub use window::MacosWindowManager;
 pub use window_positioner::MacosWindowPositioner;

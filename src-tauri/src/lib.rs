@@ -59,11 +59,8 @@ pub fn run() {
     let _log_guard = init_logging(&log_dir, None);
     log_application_start();
 
-    #[cfg(target_os = "windows")]
-    {
-        let com_guard = unsafe { crate::platform::ComGuard::init() };
-        std::mem::forget(com_guard);
-    }
+    // 平台就绪初始化（Windows 主线程 COM 保活；macOS 为空操作）
+    init_com();
 
     // ========================================================================
     // 阶段 3: 构建 Tauri 应用

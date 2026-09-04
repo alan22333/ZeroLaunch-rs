@@ -111,7 +111,7 @@ fn dirs_data() -> Result<std::path::PathBuf> {
     #[cfg(target_os = "windows")]
     {
         let home = dirs::home_dir().context("无法获取用户 Home 目录")?;
-        return Ok(home.join(".ZeroLaunch-rs"));
+        Ok(home.join(".ZeroLaunch-rs"))
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
