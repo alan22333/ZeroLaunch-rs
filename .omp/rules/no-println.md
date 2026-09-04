@@ -10,4 +10,8 @@ scope: "tool:edit(src-tauri/**), tool:write(src-tauri/**), tool:edit(crates/**),
 - `println!("xxx")` → `info!("xxx")`（启动阶段关键步骤）或 `debug!("xxx")`（运行时频繁调用）
 - `eprintln!("xxx")` → `warn!("xxx")`（可恢复错误）或 `error!("xxx")`（不可恢复错误）
 
+**豁免场景**（stdout/stderr 是产品接口而非日志通道，不适用本规则）：
+- `zerolaunch-cli`：`stdout` 输出查询结果（如 `zl query --json` 的 JSON）、`stderr` 输出错误提示——这是 CLI 的功能输出；内部诊断才用 tracing
+- `src-tauri/src/logging.rs`：tracing 初始化之前的兜底 `eprintln!`（tracing 未就绪时的唯一错误通道）
+
 注意：NEVER 在日志中输出用户敏感信息（密码、完整路径中的用户名等）。

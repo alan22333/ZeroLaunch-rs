@@ -17,4 +17,4 @@ scope: "tool:edit(*.ts), tool:edit(*.vue), tool:write(*.ts), tool:write(*.vue)"
     // 错误
     function parse(input: any): MyType { return input; }
 
-类型守卫集中在 `utils/schemaTypes.ts`。禁止在组件中内联类型判断。
+类型守卫集中在 `utils/schemaTypes.ts`（守卫集中与内联判断边界见 `frontend-type-safety` 规则）。

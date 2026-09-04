@@ -1,23 +1,9 @@
-#[cfg(target_os = "windows")]
-use tracing::warn;
 /// 系统区域设置和语言检测工具
-use tracing::{debug, info};
-#[cfg(target_os = "windows")]
+use tracing::{debug, info, warn};
 use windows::Win32::Globalization::GetUserDefaultLocaleName;
 
 /// 使用 Windows API GetUserDefaultLocaleName 来获取用户的默认区域设置
 pub fn get_system_locale() -> Option<String> {
-    #[cfg(target_os = "macos")]
-    {
-        std::env::var("LANG").ok().map(|locale| {
-            locale
-                .split('.')
-                .next()
-                .unwrap_or(&locale)
-                .replace('_', "-")
-        })
-    }
-    #[cfg(target_os = "windows")]
     unsafe {
         const LOCALE_NAME_MAX_LENGTH: usize = 85;
         let mut locale_name: [u16; LOCALE_NAME_MAX_LENGTH] = [0; LOCALE_NAME_MAX_LENGTH];
@@ -37,10 +23,6 @@ pub fn get_system_locale() -> Option<String> {
             warn!("无法获取系统语言设置");
             None
         }
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        None
     }
 }
 

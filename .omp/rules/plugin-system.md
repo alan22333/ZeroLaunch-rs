@@ -9,7 +9,7 @@ scope: "tool:read(src-tauri/src/builtin_plugin/**), tool:edit(src-tauri/src/buil
 ## 内置组件自动注册 (inventory)
 
 - 内置组件通过 `inventory` crate 实现编译期自动发现。新增组件 **无需** 修改 `lib.rs`
-- 每个组件文件底部通过 `::inventory::submit!` 块注册。`lib.rs` 的 `init_plugin_system` 在启动时通过 `builtin_registry::register_all_builtin_components()` 遍历所有条目并统一注册
+- 每个组件文件底部通过 `::inventory::submit!` 块注册。启动时 `bootstrap.rs` 的 `init_plugin_system` 经 `PluginManager::init_builtins` 调用 `builtin_registry::collect_all_builtin_entries()` 遍历所有条目并统一注册（注册编排的唯一权威是 PluginManager）
 - 8 种 Entry 类型对应 8 种组件类别：`ExecutorEntry`、`DataSourceEntry`、`KeywordOptimizerEntry`、`KeywordInjectorEntry`、`SearchEngineEntry`、`ScoreBoosterEntry`、`PluginEntry`、`ConfigEntry`
 - `InventoryContext` 负责懒创建并缓存 `PluginHandle`，相同 `handle_key` 的组件共享同一个 handle
 - `ConfigEntry` 配合 `ConfigComponentFactory` 用于纯配置组件（仅实现 `Configurable`，无其他领域 trait）
@@ -30,7 +30,7 @@ IPC：`inspector_get_state` 返回已注册组件清单 + 最近查询日志
 
 - `CandidatePipeline::collect()` 是异步方法，按注册顺序调用每个 DataSource 的 `fetch_candidates()`
 - 采集后的候选项经过 KeywordOptimizer 链处理关键词
-- 候选项缓存在 `SessionDispatcher` 中，通过 `bridge_refresh_candidates` 命令触发重新采集。搜索 **必须** 使用缓存数据
+- 候选项缓存在 `SessionDispatcher` 中，通过 `refresh_candidates()` 触发重新采集（`bridge_refresh_candidates` 仅是 IPC 触发入口之一，配置变更/插件加载等经事件通道同样触发）。搜索 **必须** 使用缓存数据
 
 ## SearchPipeline
 
@@ -44,8 +44,7 @@ IPC：`inspector_get_state` 返回已注册组件清单 + 最近查询日志
   1. `PluginRuntimeEvent` 通道 — `PluginManager` 发布插件生命周期事件（加载/卸载/崩溃）
   2. `ConfigEvent` 通道 — `ConfigManager` 发布配置变更事件
   3. 三层解耦：`PluginManager` → `PluginRuntimeEvent` → `ConfigManager`（监听并同步注册/解注册） → `ConfigEvent` → `SessionDispatcher`（监听并重建管道）
-- `PluginRuntimeEvent` 替代了已删除的 `AdapterRegistrar`（`plugin_framework/adapter_registrar.rs`）
-- `ConfigEntry` 通过 `builtin_plugin/config/` 中的纯配置组件在 `builtin_registry.rs` 中注册（无需单独的 `core_registry.rs`），内置组件的所有 Entry 类型统一在 `builtin_registry` 中管理，消除循环依赖
+- `ConfigEntry` 通过 `builtin_plugin/config/` 中的纯配置组件在 `builtin_registry.rs` 中注册，内置组件的所有 Entry 类型统一在 `builtin_registry` 中管理
 
 ## 依赖方向
 

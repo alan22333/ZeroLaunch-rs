@@ -1,7 +1,7 @@
 ---
 description: ConfigAction 规范 — 配置保存前的副作用测试（如 WebDAV 连通性），纯查询/计算操作，field-level 可含有限副作用
 condition: "execute_config_action|config_actions|ConfigActionDef|ConfigAction"
-scope: "tool:edit(src-tauri/src/builtin_plugin/**), tool:write(src-tauri/src/builtin_plugin/**), tool:edit(crates/plugin-api/src/config/**), tool:write(crates/plugin-api/src/config/**)"
+scope: "tool:edit(src-tauri/src/builtin_plugin/**), tool:write(src-tauri/src/builtin_plugin/**), tool:edit(src-tauri/src/core/config/**), tool:write(src-tauri/src/core/config/**), tool:edit(src-tauri/src/commands/**), tool:write(src-tauri/src/commands/**), tool:edit(crates/plugin-api/src/config/**), tool:write(crates/plugin-api/src/config/**)"
 ---
 
 # ConfigAction 规范
@@ -22,7 +22,7 @@ scope: "tool:edit(src-tauri/src/builtin_plugin/**), tool:write(src-tauri/src/bui
 4. **禁止** 调用 ConfigManager、SessionDispatcher 等框架层方法
 5. **允许** 的副作用类型：
    - 写入插件层缓存（如图标缓存）
-   - 文件系统写入（不超过 100ms）
+   - 文件系统写入（避免大文件/同步阻塞式写入）
    - 轻量级 HTTP 请求（不超过 500ms timeout）
 6. 副作用动作的返回值 **必须** 包含 `"success": true/false` 字段
 ## 参数传递

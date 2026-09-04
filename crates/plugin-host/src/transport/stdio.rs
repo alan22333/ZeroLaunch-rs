@@ -4,6 +4,10 @@ use tokio::io::{BufReader, BufWriter};
 use tokio::process::Child;
 use zerolaunch_plugin_protocol::ProtocolError;
 
+/// 隐藏子进程控制台窗口的创建标志（release 宿主无控制台，见 spawn 内注释）。
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 /// 子进程传输层：启动插件进程并接好 stdin/stdout/stderr 三根管道。
 ///
 /// 本结构体只负责"启动进程 + 暴露管道句柄"，不关心 JSON-RPC 协议。
@@ -51,6 +55,13 @@ impl StdioTransport {
             .stderr(Stdio::piped())
             // 当宿主进程退出时，自动杀掉子进程（防止孤儿进程泄露）。
             .kill_on_drop(true);
+
+        // release 宿主是无控制台的 GUI 进程（windows_subsystem = "windows"）。
+        // 不显式隐藏时，启动 console 子系统的插件 exe 会弹出一个新终端窗口
+        // （标题为 exe 路径）；dev 下宿主带控制台，子进程继承控制台故不出现，
+        // 因此该 bug 只在 release 复现。creation_flags 是 tokio 的 Windows 固有方法。
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW);
 
         // --- 2. 注入自定义环境变量 ---
         for (k, v) in env {
