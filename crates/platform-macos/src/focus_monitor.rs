@@ -28,6 +28,8 @@ impl MacosFocusMonitor {
                 }
                 _ => {}
             });
+        } else {
+            tracing::warn!("macos focus monitor: \"main\" window not found, focus-loss events will not be delivered");
         }
         Self { callbacks }
     }

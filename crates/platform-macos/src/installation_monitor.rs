@@ -32,6 +32,9 @@ pub struct MacosInstallationMonitor {
     watch_paths: Mutex<Vec<String>>,
     /// Debounce interval in milliseconds shared with the watcher callback.
     debounce_ms: Arc<AtomicU64>,
+    /// Debounce thread handle; joined on stop so a fast restart cannot
+    /// deliver a stale callback from the previous worker.
+    worker: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 impl MacosInstallationMonitor {
     pub fn new() -> Self {
@@ -41,6 +44,7 @@ impl MacosInstallationMonitor {
             callbacks: Arc::new(DashMap::new()),
             watch_paths: Mutex::new(Vec::new()),
             debounce_ms: Arc::new(AtomicU64::new(DEFAULT_DEBOUNCE_MS)),
+            worker: Mutex::new(None),
         }
     }
     fn convert_event(event: notify::Event) -> InstallationEvent {
@@ -110,43 +114,65 @@ impl InstallationMonitor for MacosInstallationMonitor {
         *self.watcher.lock() = Some(watcher);
         let callbacks = self.callbacks.clone();
         let debounce_ms = self.debounce_ms.clone();
-        thread::spawn(move || {
-            let mut pending: Option<InstallationEvent> = None;
-            let mut last_event: Option<Instant> = None;
-            loop {
-                let result = if let Some(last) = last_event {
-                    rx.recv_timeout(
-                        Duration::from_millis(debounce_ms.load(Ordering::Relaxed))
-                            .saturating_sub(last.elapsed()),
-                    )
-                } else {
-                    match rx.recv() {
-                        Ok(event) => Ok(event),
-                        Err(_) => break,
-                    }
-                };
-                match result {
-                    Ok(Ok(event)) => {
-                        pending = Some(MacosInstallationMonitor::convert_event(event));
-                        last_event = Some(Instant::now());
-                    }
-                    Ok(Err(_)) => {}
-                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                        if let Some(event) = pending.take() {
-                            for registered in callbacks.iter() {
-                                (registered.value().callback)(event.clone());
-                            }
+        let worker = thread::Builder::new()
+            .name("macos-installation-monitor".into())
+            .spawn(move || {
+                let mut pending: Option<InstallationEvent> = None;
+                let mut last_event: Option<Instant> = None;
+                loop {
+                    let result = if let Some(last) = last_event {
+                        rx.recv_timeout(
+                            Duration::from_millis(debounce_ms.load(Ordering::Relaxed))
+                                .saturating_sub(last.elapsed()),
+                        )
+                    } else {
+                        match rx.recv() {
+                            Ok(event) => Ok(event),
+                            Err(_) => break,
                         }
-                        last_event = None;
+                    };
+                    match result {
+                        Ok(Ok(event)) => {
+                            pending = Some(MacosInstallationMonitor::convert_event(event));
+                            last_event = Some(Instant::now());
+                        }
+                        Ok(Err(_)) => {}
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                            if let Some(event) = pending.take() {
+                                for registered in callbacks.iter() {
+                                    (registered.value().callback)(event.clone());
+                                }
+                            }
+                            last_event = None;
+                        }
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                     }
-                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                 }
+            });
+        match worker {
+            Ok(handle) => {
+                *self.worker.lock() = Some(handle);
+                Ok(())
             }
-        });
-        Ok(())
+            Err(error) => {
+                *self.watcher.lock() = None;
+                self.is_watching.store(false, Ordering::Relaxed);
+                Err(HostApiError::ExecutionFailed {
+                    service: "installation_monitor".into(),
+                    reason: format!("failed to spawn watcher thread: {error}"),
+                })
+            }
+        }
     }
     async fn stop_watching(&self) -> Result<(), HostApiError> {
+        // Drop the watcher first: closing the notify channel is what makes
+        // the worker's recv() return Disconnected and the loop exit.
         *self.watcher.lock() = None;
+        if let Some(handle) = self.worker.lock().take() {
+            if handle.join().is_err() {
+                tracing::warn!("installation monitor worker thread panicked");
+            }
+        }
         self.is_watching.store(false, Ordering::Relaxed);
         Ok(())
     }

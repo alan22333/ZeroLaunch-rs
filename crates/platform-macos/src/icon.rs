@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use zerolaunch_plugin_api::common::image_utils::ImageUtils;
 use zerolaunch_plugin_api::host::HostApiError;
 use zerolaunch_plugin_api::services::icon::IconExtractor;
 
@@ -80,6 +81,12 @@ impl IconExtractor for MacosIconExtractor {
             .and_then(|p| convert_to_png(&p))
     }
     async fn extract_from_url(&self, url: &str) -> Result<Vec<u8>, HostApiError> {
+        if !self.is_network_available() {
+            return Err(HostApiError::IconExtractionFailed {
+                request: url.into(),
+                reason: "no network connection available".into(),
+            });
+        }
         let parsed = url::Url::parse(url).map_err(|e| HostApiError::IconExtractionFailed {
             request: url.into(),
             reason: e.to_string(),
@@ -94,19 +101,41 @@ impl IconExtractor for MacosIconExtractor {
                     reason: "URL has no host".into()
                 })?
         );
-        reqwest::get(favicon)
-            .await
+        let client = reqwest::Client::builder()
+            .user_agent(concat!(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ",
+                "AppleWebKit/537.36 (KHTML, like Gecko) ",
+                "Chrome/120.0.0.0 Safari/537.36"
+            ))
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
             .map_err(|e| HostApiError::IconExtractionFailed {
                 request: url.into(),
-                reason: e.to_string(),
-            })?
-            .bytes()
-            .await
-            .map(|b| b.to_vec())
-            .map_err(|e| HostApiError::IconExtractionFailed {
+                reason: format!("failed to build reqwest client: {e}"),
+            })?;
+        let response =
+            client
+                .get(&favicon)
+                .send()
+                .await
+                .map_err(|e| HostApiError::IconExtractionFailed {
+                    request: url.into(),
+                    reason: e.to_string(),
+                })?;
+        let bytes = response.bytes().await.map(|b| b.to_vec()).map_err(|e| {
+            HostApiError::IconExtractionFailed {
                 request: url.into(),
                 reason: e.to_string(),
-            })
+            }
+        })?;
+        // The favicon may be ICO while the IconExtractor contract requires
+        // PNG; convert so downstream WebP encoding can decode it.
+        ImageUtils::convert_image_to_png(bytes).await.map_err(|e| {
+            HostApiError::IconExtractionFailed {
+                request: url.into(),
+                reason: format!("favicon is not a decodable image: {e}"),
+            }
+        })
     }
     async fn extract_from_extension(&self, _ext: &str) -> Result<Vec<u8>, HostApiError> {
         fs::read(&self.default_app_icon_path).map_err(|e| HostApiError::IconExtractionFailed {
@@ -121,6 +150,9 @@ impl IconExtractor for MacosIconExtractor {
         &self.default_web_icon_path
     }
     fn is_network_available(&self) -> bool {
+        // No pure-CrossPlatform reachability check on macOS; a missing
+        // network surfaces as the 10s request timeout instead of a fast
+        // failure. Acceptable baseline for URL icon extraction.
         true
     }
 }

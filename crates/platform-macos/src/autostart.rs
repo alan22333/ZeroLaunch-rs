@@ -55,24 +55,47 @@ impl AutoStartManager for MacosAutoStartManager {
                 reason: e.to_string(),
             }
         })?;
-        let _ = Command::new("launchctl")
-            .args([
-                "bootstrap",
-                &format!("gui/{}", current_uid()),
-                path.to_string_lossy().as_ref(),
-            ])
-            .status();
+        let service = format!("gui/{}", current_uid());
+        let launchctl = |args: &[&str]| {
+            Command::new("launchctl").args(args).output().map_err(|e| {
+                HostApiError::AutoStartFailed {
+                    reason: format!("failed to run launchctl: {e}"),
+                }
+            })
+        };
+        // Boot out first so re-enabling is idempotent (failure means not loaded yet).
+        let _ = launchctl(&["bootout", &service, path.to_string_lossy().as_ref()]);
+        let output = launchctl(&["bootstrap", &service, path.to_string_lossy().as_ref()])?;
+        if !output.status.success() {
+            // Roll back the plist so is_enabled stays consistent with launchctl state.
+            let _ = fs::remove_file(&path);
+            return Err(HostApiError::AutoStartFailed {
+                reason: format!(
+                    "launchctl bootstrap failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ),
+            });
+        }
         Ok(())
     }
     async fn disable(&self, task_name: &str) -> Result<(), HostApiError> {
         let path = Self::plist_path(task_name)?;
-        let _ = Command::new("launchctl")
-            .args([
-                "bootout",
-                &format!("gui/{}", current_uid()),
-                path.to_string_lossy().as_ref(),
-            ])
-            .status();
+        let service = format!("gui/{}", current_uid());
+        let output = Command::new("launchctl")
+            .args(["bootout", &service, path.to_string_lossy().as_ref()])
+            .output()
+            .map_err(|e| HostApiError::AutoStartFailed {
+                reason: format!("failed to run launchctl: {e}"),
+            })?;
+        if !output.status.success() {
+            // LaunchAgent registration is driven by plist presence at next
+            // login; a bootout failure means the service was already gone
+            // (state drifted), so removing the plist converges the switch.
+            tracing::warn!(
+                "launchctl bootout failed, removing plist anyway: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
         if path.exists() {
             fs::remove_file(path).map_err(|e| HostApiError::AutoStartFailed {
                 reason: e.to_string(),

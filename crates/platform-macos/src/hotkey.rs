@@ -32,6 +32,22 @@ impl MacosHotkeyManager {
         let code = match hotkey.key.as_str() {
             "Space" => Code::Space,
             "Tab" => Code::Tab,
+            "CapsLock" => Code::CapsLock,
+            key if key.len() == 1 && key.as_bytes()[0].is_ascii_digit() => {
+                match key.as_bytes()[0] {
+                    b'0' => Code::Digit0,
+                    b'1' => Code::Digit1,
+                    b'2' => Code::Digit2,
+                    b'3' => Code::Digit3,
+                    b'4' => Code::Digit4,
+                    b'5' => Code::Digit5,
+                    b'6' => Code::Digit6,
+                    b'7' => Code::Digit7,
+                    b'8' => Code::Digit8,
+                    b'9' => Code::Digit9,
+                    _ => unreachable!(),
+                }
+            }
             key if key.len() == 1 && key.as_bytes()[0].is_ascii_alphabetic() => {
                 match key.to_ascii_uppercase().as_str() {
                     "A" => Code::KeyA,

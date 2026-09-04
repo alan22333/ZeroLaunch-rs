@@ -75,9 +75,8 @@ pub fn run() {
     let _log_guard = init_logging(&log_dir, None);
     log_application_start();
 
-    // 初始化 COM 库（主线程常驻，不释放）
-    let _com_guard = unsafe { ComGuard::init() };
-    std::mem::forget(_com_guard);
+    // 平台就绪初始化（Windows 主线程 COM 保活；macOS 为空操作）
+    init_com();
 
     // ========================================================================
     // 阶段 3: 构建 Tauri 应用
