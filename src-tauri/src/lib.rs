@@ -61,7 +61,7 @@ pub fn run() {
 
     #[cfg(target_os = "windows")]
     {
-        let com_guard = unsafe { zerolaunch_platform_windows::ComGuard::init() };
+        let com_guard = unsafe { crate::platform::ComGuard::init() };
         std::mem::forget(com_guard);
     }
 

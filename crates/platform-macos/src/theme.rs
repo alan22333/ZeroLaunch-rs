@@ -45,18 +45,23 @@ pub fn start_system_theme_monitor(
         return Ok(());
     }
     let callback: Arc<dyn Fn(Theme) + Send + Sync> = Arc::new(callback);
-    thread::spawn(move || {
-        let provider = MacosThemeProvider;
-        let mut previous = provider.current_system_theme().unwrap_or(Theme::Light);
-        loop {
-            thread::sleep(Duration::from_secs(2));
-            let current = provider.current_system_theme().unwrap_or(previous);
-            if current != previous {
-                previous = current;
-                callback(current);
+    let handle = thread::Builder::new()
+        .name("macos-theme-monitor".into())
+        .spawn(move || {
+            let provider = MacosThemeProvider;
+            let mut previous = provider.current_system_theme().unwrap_or(Theme::Light);
+            loop {
+                thread::sleep(Duration::from_secs(2));
+                let current = provider.current_system_theme().unwrap_or(previous);
+                if current != previous {
+                    previous = current;
+                    callback(current);
+                }
             }
-        }
-    });
+        });
+    if let Err(error) = handle {
+        return Err(format!("failed to spawn theme monitor thread: {error}"));
+    }
     Ok(())
 }
 #[cfg(test)]

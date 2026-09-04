@@ -110,6 +110,7 @@ anyhow.workspace = true
  reqwest.workspace = true
  reqwest_dav.workspace = true
  tokio.workspace = true
+sys-locale.workspace = true
 scraper.workspace = true
 url.workspace = true
 fnv.workspace = true

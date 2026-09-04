@@ -2,7 +2,7 @@
 
 #[cfg(target_os = "windows")]
 pub use zerolaunch_platform_windows::{
-    start_system_theme_monitor, windows_capabilities as platform_capabilities,
+    start_system_theme_monitor, windows_capabilities as platform_capabilities, ComGuard,
     WindowsAppEnumerator as PlatformAppEnumerator, WindowsAppLauncher as PlatformAppLauncher,
     WindowsAutoStartManager as PlatformAutoStartManager,
     WindowsClipboardManager as PlatformClipboardManager,
@@ -21,9 +21,9 @@ pub use zerolaunch_platform_windows::{
 
 #[cfg(target_os = "macos")]
 pub use zerolaunch_platform_macos::{
-    macos_capabilities as platform_capabilities, start_system_theme_monitor,
-    MacosAppEnumerator as PlatformAppEnumerator, MacosAppLauncher as PlatformAppLauncher,
-    MacosAutoStartManager as PlatformAutoStartManager,
+    is_foreground_fullscreen, macos_capabilities as platform_capabilities,
+    start_system_theme_monitor, MacosAppEnumerator as PlatformAppEnumerator,
+    MacosAppLauncher as PlatformAppLauncher, MacosAutoStartManager as PlatformAutoStartManager,
     MacosClipboardManager as PlatformClipboardManager,
     MacosClipboardProvider as PlatformClipboardProvider, MacosFocusMonitor as PlatformFocusMonitor,
     MacosHotkeyManager as PlatformHotkeyManager, MacosIconExtractor as PlatformIconExtractor,
